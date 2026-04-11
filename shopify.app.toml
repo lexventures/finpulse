@@ -1,0 +1,22 @@
+name = "FinPulse"
+client_id = ""
+application_url = ""
+embedded = true
+
+[access_scopes]
+scopes = "read_orders,read_products,read_inventory"
+
+[auth]
+redirect_urls = [ "https://localhost:3000/api/auth/callback" ]
+
+[webhooks]
+api_version = "2025-04"
+
+  [webhooks.privacy_compliance]
+  customer_deletion_url = "/api/webhooks"
+  customer_data_request_url = "/api/webhooks"
+  shop_deletion_url = "/api/webhooks"
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = ""
