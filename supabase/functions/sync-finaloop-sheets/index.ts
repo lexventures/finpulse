@@ -259,8 +259,9 @@ function round2(n: number): number {
 
 async function importPrivateKey(pem: string): Promise<CryptoKey> {
   const stripped = pem
-    .replace(/-----BEGIN (?:RSA )?PRIVATE KEY-----/, '')
-    .replace(/-----END (?:RSA )?PRIVATE KEY-----/, '')
+    .replace(/-----BEGIN [A-Z ]*KEY-----/g, '')
+    .replace(/-----END [A-Z ]*KEY-----/g, '')
+    .replace(/\\n/g, '')
     .replace(/\s/g, '')
   const binary = atob(stripped)
   const bytes = new Uint8Array(binary.length)
@@ -623,7 +624,11 @@ Deno.serve(async (req) => {
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
     })
   }
-  const saKey = saKeyRaw.replace(/\\n/g, '\n')
+  const saKey = saKeyRaw
+    .replace(/\\n/g, '\n')
+    .replace(/\\\\n/g, '\n')
+    .replace(/"\s*$/g, '')
+    .replace(/^\s*"/g, '')
 
   // Load Sheet IDs: query params > env vars > fin_settings
   const url = new URL(req.url)
