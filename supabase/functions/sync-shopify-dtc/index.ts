@@ -11,7 +11,6 @@ interface OrderNode {
   totalDiscountsSet: { shopMoney: { amount: string } }
   sourceName: string
   tags: string[]
-  customer: { numberOfOrders: number } | null
 }
 
 interface OrderEdge {
@@ -144,9 +143,6 @@ const ORDERS_QUERY = `
           totalDiscountsSet { shopMoney { amount } }
           sourceName
           tags
-          customer {
-            numberOfOrders
-          }
         }
         cursor
       }
@@ -274,12 +270,8 @@ function aggregateOrders(orders: OrderNode[]): Aggregation {
     agg.net_revenue += totalPrice
     agg.order_count++
 
-    const customerOrders = order.customer?.numberOfOrders ?? 0
-    if (customerOrders <= 1) {
-      agg.new_customer_orders++
-    } else {
-      agg.returning_customer_orders++
-    }
+    // New/returning customer split not available without read_customers scope.
+    // These fields will be 0; use ShopifyQL for customer segmentation instead.
 
     const tags = order.tags ?? []
     const isMember = tags.some(
