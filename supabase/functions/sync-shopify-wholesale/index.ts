@@ -48,7 +48,7 @@ const SHOPIFYQL_QUERY = `
           columns { name dataType }
           rows
         }
-        parseErrors { message }
+        parseErrors
       }
     }
   }
@@ -60,7 +60,7 @@ interface ShopifyQLResult {
       columns: Array<{ name: string; dataType: string }>
       rows: string[][]
     }
-    parseErrors?: Array<{ message: string }>
+    parseErrors?: string[]
   }
 }
 
