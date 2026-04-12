@@ -320,32 +320,41 @@ Deno.serve(async (req) => {
   const syncId: string = syncLog?.id ?? ''
 
   // INVENTORY: emilylex store ONLY. Never pull from elsw.
-  // The wholesale store shares the same inventory pool.
-  const dtcShop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
+  const shop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
+  const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
+  const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
 
-  // Load offline session
-  const { data: session, error: sessionError } = await supabase
-    .from('shopify_sessions')
-    .select('access_token, shop')
-    .eq('is_online', false)
-    .eq('shop', dtcShop)
-    .limit(1)
-    .single()
-
-  if (sessionError || !session?.access_token) {
-    const msg = sessionError
-      ? `Failed to load Shopify session: ${sessionError.message}`
-      : `No offline Shopify session found for ${dtcShop}`
+  if (!clientId || !clientSecret) {
+    const msg = 'SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set'
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
     })
   }
 
-  const { access_token: accessToken, shop } = session
+  // Client credentials grant — get a fresh access token
+  let accessToken: string
+  try {
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+    })
+    if (!tokenRes.ok) throw new Error(`Token request failed: ${await tokenRes.text()}`)
+    const tokenData = await tokenRes.json()
+    accessToken = tokenData.access_token
+    if (!accessToken) throw new Error('No access_token in response')
+  } catch (err) {
+    const msg = `Shopify auth failed for ${shop}: ${err instanceof Error ? err.message : err}`
+    await supabase.from('fin_sync_log').update({
+      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
+    }).eq('id', syncId)
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    })
+  }
 
   // Determine date range (allow override via ?date=YYYY-MM-DD)
   const url = new URL(req.url)

@@ -84,7 +84,9 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  const wholesaleShop = Deno.env.get('SHOPIFY_WHOLESALE_SHOP') || 'elsw.myshopify.com'
+  const shop = Deno.env.get('SHOPIFY_WHOLESALE_SHOP') || 'elsw.myshopify.com'
+  const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
+  const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
 
   const { data: syncLog } = await supabase
     .from('fin_sync_log')
@@ -93,16 +95,8 @@ Deno.serve(async (req) => {
     .single()
   const syncId = syncLog?.id ?? ''
 
-  const { data: session, error: sessionError } = await supabase
-    .from('shopify_sessions')
-    .select('access_token, shop')
-    .eq('is_online', false)
-    .eq('shop', wholesaleShop)
-    .limit(1)
-    .single()
-
-  if (sessionError || !session?.access_token) {
-    const msg = sessionError?.message ?? `No offline session found for ${wholesaleShop}`
+  if (!clientId || !clientSecret) {
+    const msg = 'SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set'
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -111,7 +105,26 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { access_token: accessToken, shop } = session
+  let accessToken: string
+  try {
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+    })
+    if (!tokenRes.ok) throw new Error(`Token request failed: ${await tokenRes.text()}`)
+    const tokenData = await tokenRes.json()
+    accessToken = tokenData.access_token
+    if (!accessToken) throw new Error('No access_token in response')
+  } catch (err) {
+    const msg = `Shopify auth failed for ${shop}: ${err instanceof Error ? err.message : err}`
+    await supabase.from('fin_sync_log').update({
+      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
+    }).eq('id', syncId)
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    })
+  }
 
   const url = new URL(req.url)
   const days = parseInt(url.searchParams.get('days') ?? '90', 10)
