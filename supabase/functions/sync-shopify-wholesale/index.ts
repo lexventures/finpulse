@@ -139,7 +139,10 @@ Deno.serve(async (req) => {
       }
 
       // 1. Sales by source_name (Faire vs Direct segmentation)
-      const salesQL = `FROM sales SHOW day, net_sales, gross_sales, orders, average_order_value, source_name GROUP BY day, source_name TIMESERIES day SINCE -${days}d UNTIL today`
+      // ShopifyQL doesn't support source_name as a dimension, so we can't split
+      // Faire vs Direct at this level. All wholesale store sales go to wholesale_direct.
+      // Faire-specific revenue comes from Finaloop P&L (which is authoritative for financials).
+      const salesQL = `FROM sales SHOW day, net_sales, gross_sales, orders, average_order_value TIMESERIES day SINCE -${days}d UNTIL today`
 
       const salesResult = await shopifyGraphQL<ShopifyQLResult>(
         shop, accessToken, SHOPIFYQL_QUERY, { query: salesQL },
@@ -154,49 +157,17 @@ Deno.serve(async (req) => {
       if (salesData?.rows?.length) {
         const cols = Object.fromEntries(salesData.columns.map((c, i) => [c.name, i]))
 
-        // Aggregate by day+segment (multiple source_names may map to same segment)
-        const daySegmentMap = new Map<string, {
-          gross_revenue: number
-          net_revenue: number
-          order_count: number
-          total_revenue_for_aov: number
-        }>()
-
-        for (const row of salesData.rows) {
-          const day = row[cols['day']] || ''
-          const sourceName = row[cols['source_name']] || 'web'
-          const segment = mapSourceToSegment(sourceName)
-          const key = `${day}|${segment}`
-
-          const existing = daySegmentMap.get(key) || {
-            gross_revenue: 0, net_revenue: 0, order_count: 0, total_revenue_for_aov: 0,
-          }
-
-          const netSales = parseFloat(row[cols['net_sales']] ?? '0')
-          const grossSales = parseFloat(row[cols['gross_sales']] ?? '0')
-          const orders = parseInt(row[cols['orders']] ?? '0', 10)
-
-          existing.gross_revenue += grossSales
-          existing.net_revenue += netSales
-          existing.order_count += orders
-          existing.total_revenue_for_aov += grossSales
-          daySegmentMap.set(key, existing)
-        }
-
-        const upsertData = Array.from(daySegmentMap.entries())
-          .filter(([key]) => key.split('|')[0])
-          .map(([key, val]) => {
-            const [date, segment] = key.split('|')
-            return {
-              date,
-              segment,
-              gross_revenue: round(val.gross_revenue),
-              net_revenue: round(val.net_revenue),
-              order_count: val.order_count,
-              avg_order_value: val.order_count > 0 ? round(val.total_revenue_for_aov / val.order_count) : 0,
-              synced_at: new Date().toISOString(),
-            }
-          })
+        const upsertData = salesData.rows
+          .filter((row) => row[cols['day']])
+          .map((row) => ({
+            date: row[cols['day']],
+            segment: 'wholesale_direct' as const,
+            gross_revenue: round(parseFloat(row[cols['gross_sales']] ?? '0')),
+            net_revenue: round(parseFloat(row[cols['net_sales']] ?? '0')),
+            order_count: parseInt(row[cols['orders']] ?? '0', 10),
+            avg_order_value: round(parseFloat(row[cols['average_order_value']] ?? '0')),
+            synced_at: new Date().toISOString(),
+          }))
 
         for (let i = 0; i < upsertData.length; i += 500) {
           const chunk = upsertData.slice(i, i + 500)
