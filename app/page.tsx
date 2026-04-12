@@ -94,7 +94,7 @@ export default async function CEOOverviewPage() {
     supabase
       .from('fin_kpi_monthly')
       .select(
-        'month, channel, net_revenue, allocated_ad_spend, gross_margin_pct, cogs, contribution_margin',
+        'month, channel, net_revenue, allocated_ad_spend, gross_margin_pct, cogs, contribution_margin, is_partial',
       )
       .neq('channel', 'company')
       .order('month', { ascending: false }),
@@ -126,7 +126,10 @@ export default async function CEOOverviewPage() {
 
   const pnl = pnlResult.data ?? []
   const pnlSpark6 = pnl.slice(0, 6).reverse()
-  const sparklineRunRate = pnlSpark6.map((m) => (Number(m.net_revenue) || 0) * 12)
+  const sparklineRunRate = pnlSpark6.map((m) => {
+    const rev = Number(m.net_revenue) || 0
+    return rev * 12
+  })
   const sparklineRevenueMtd = pnlSpark6.map((m) => Number(m.net_revenue) || 0)
   const sparklineGrossMargin = pnlSpark6.map((m) => Number(m.gross_margin_pct) || 0)
   const forecasts = forecastResult.data ?? []
@@ -148,13 +151,107 @@ export default async function CEOOverviewPage() {
   const priorYear = pnl.length >= 13 ? pnl[12] : null
   const latestMonth = latest?.month
 
-  // Run Rate = latest month net_revenue × 12
   const latestRevenue = latest ? Number(latest.net_revenue) || 0 : null
-  const runRate = latestRevenue !== null ? latestRevenue * 12 : null
   const priorRevenue = priorYear ? Number(priorYear.net_revenue) || 0 : null
+
+  const today = new Date()
+  const dayOfMonth = today.getDate()
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+
+  const proratedLatestRevenue =
+    latestRevenue !== null && latest?.is_partial && dayOfMonth > 0
+      ? (latestRevenue / dayOfMonth) * daysInMonth
+      : latestRevenue
+
+  const completedMonths = pnl.filter((m) => !m.is_partial)
+  const trailing12 = completedMonths.slice(0, 12)
+  const trailing12Sum = trailing12.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
+  const trailing12Count = trailing12.length
+
+  const pyMonths = completedMonths.slice(12, 24)
+  const pyTotalRevenue = pyMonths.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
+  const seasonalIndices = new Map<number, number>()
+  if (pyMonths.length >= 12 && pyTotalRevenue > 0) {
+    for (const m of pyMonths) {
+      const mo = new Date(String(m.month) + 'T00:00:00').getMonth()
+      seasonalIndices.set(mo, (Number(m.net_revenue) || 0) / pyTotalRevenue)
+    }
+  }
+
+  let runRate: number | null = null
+  let runRateMethod = ''
+  if (trailing12Count >= 12 && seasonalIndices.size === 12) {
+    const latestMo = latest ? new Date(String(latest.month) + 'T00:00:00').getMonth() : -1
+    const currentIdx = seasonalIndices.get(latestMo) ?? (1 / 12)
+    const baseMonthRevenue = proratedLatestRevenue ?? 0
+    runRate = currentIdx > 0 ? baseMonthRevenue / currentIdx : trailing12Sum
+    runRateMethod = 'seasonally adjusted'
+  } else if (trailing12Count >= 3) {
+    const avgMonthly = trailing12Sum / trailing12Count
+    runRate = avgMonthly * 12
+    runRateMethod = `${trailing12Count}mo avg × 12`
+  } else if (proratedLatestRevenue !== null) {
+    runRate = proratedLatestRevenue * 12
+    runRateMethod = latest?.is_partial ? 'prorated × 12' : 'latest mo × 12'
+  }
+
+  const trailing12Mean = trailing12Count > 0 ? trailing12Sum / trailing12Count : 0
+  const trailing12Std = trailing12Count > 1
+    ? Math.sqrt(
+        trailing12.reduce((s, m) => {
+          const v = Number(m.net_revenue) || 0
+          return s + (v - trailing12Mean) ** 2
+        }, 0) / (trailing12Count - 1)
+      )
+    : 0
+  const outlierThreshold = trailing12Mean + 2 * trailing12Std
+  const normalizedMonths = trailing12Std > 0
+    ? trailing12.filter((m) => (Number(m.net_revenue) || 0) <= outlierThreshold)
+    : trailing12
+  const hasOutliers = normalizedMonths.length < trailing12Count
+  let normalizedRunRate: number | null = null
+  if (hasOutliers && normalizedMonths.length >= 3) {
+    const normSum = normalizedMonths.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
+    normalizedRunRate = (normSum / normalizedMonths.length) * 12
+  }
+
+  const CHANNEL_KEYS_FOR_GROWTH = ['dtc', 'wholesale_faire', 'wholesale_direct', 'wholesale_key', 'marketplace', 'retail']
+  const channelGrowthRates = new Map<string, number>()
+  let channelWeightedRunRate: number | null = null
+
+  if (trailing12Count >= 6) {
+    for (const chKey of CHANNEL_KEYS_FOR_GROWTH) {
+      const chRows = channelPnl
+        .filter((r) => r.channel === chKey && !r.is_partial)
+        .sort((a, b) => String(b.month).localeCompare(String(a.month)))
+      const recent3 = chRows.slice(0, 3)
+      const prior3 = chRows.slice(3, 6)
+      if (recent3.length >= 3 && prior3.length >= 3) {
+        const recentAvg = recent3.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / 3
+        const priorAvg = prior3.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / 3
+        const momGrowth = priorAvg > 0 ? (recentAvg - priorAvg) / priorAvg : 0
+        channelGrowthRates.set(chKey, Math.max(-0.5, Math.min(momGrowth, 1.0)))
+      }
+    }
+    if (channelGrowthRates.size > 0) {
+      let fwdSum = 0
+      for (const chKey of CHANNEL_KEYS_FOR_GROWTH) {
+        const chRows = channelPnl
+          .filter((r) => r.channel === chKey)
+          .sort((a, b) => String(b.month).localeCompare(String(a.month)))
+        const latestChRev = Number(chRows[0]?.net_revenue) || 0
+        const g = channelGrowthRates.get(chKey) ?? 0
+        for (let m = 1; m <= 12; m++) {
+          fwdSum += latestChRev * (1 + g) ** m
+        }
+      }
+      channelWeightedRunRate = fwdSum
+    }
+  }
+
   const runRateYoY =
     priorRevenue && priorRevenue > 0 && runRate !== null
-      ? (((latestRevenue! - priorRevenue) / priorRevenue) * 100)
+      ? (((runRate - priorRevenue * 12) / (priorRevenue * 12)) * 100)
       : null
 
   // Cash — prefer balance sheet -> cashflow ending -> forecast starting week 1
@@ -211,9 +308,6 @@ export default async function CEOOverviewPage() {
       ? ((latestRevenue - priorRevenue) / priorRevenue) * 100
       : null
 
-  const today = new Date()
-  const dayOfMonth = today.getDate()
-  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
   const revenuePace =
     latestRevenue !== null && dayOfMonth > 0
       ? (latestRevenue / dayOfMonth) * daysInMonth
@@ -479,13 +573,13 @@ export default async function CEOOverviewPage() {
       <div className="grid grid-cols-2 gap-4 px-6 pb-4 md:grid-cols-4">
         <MetricCard
           title="Run Rate"
-          description="Latest month revenue × 12"
+          description={`Annualized revenue (${runRateMethod})`}
           value={formatCompact(runRate)}
-          subtitle={
-            runRateYoY !== null
-              ? `${runRateYoY > 0 ? '+' : ''}${runRateYoY.toFixed(1)}% YoY`
-              : undefined
-          }
+          subtitle={[
+            runRateYoY !== null ? `${runRateYoY > 0 ? '+' : ''}${runRateYoY.toFixed(1)}% YoY` : null,
+            normalizedRunRate !== null ? `Normalized: ${formatCompact(normalizedRunRate)}` : null,
+            channelWeightedRunRate !== null ? `Ch-weighted fwd: ${formatCompact(channelWeightedRunRate)}` : null,
+          ].filter(Boolean).join(' · ') || undefined}
           trend={
             runRateYoY !== null
               ? { value: Number(runRateYoY.toFixed(1)), label: 'YoY' }
