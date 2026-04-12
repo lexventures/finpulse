@@ -13,7 +13,9 @@ import {
   formatCount,
 } from '@/lib/utils/format'
 import { calcBlendedCac } from '@/lib/calculations/cac'
+import { calcSimplifiedLtv, calcLtvCacRatio } from '@/lib/calculations/ltv'
 import { AlertFeedWrapper } from './alert-feed-wrapper'
+import { BriefingCard } from './briefing-card'
 
 const CHANNEL_LABELS: Record<string, string> = {
   dtc: 'DTC',
@@ -52,6 +54,7 @@ export default async function CEOOverviewPage() {
     channelPnlResult,
     shopifyResult,
     revenueDailyResult,
+    briefingResult,
   ] = await Promise.all([
     supabase
       .from('fin_kpi_monthly')
@@ -95,6 +98,11 @@ export default async function CEOOverviewPage() {
       .select('date, order_count, new_customer_orders')
       .eq('channel', 'dtc')
       .gte('date', `${new Date().getFullYear() - 2}-01-01`),
+    supabase
+      .from('fin_settings')
+      .select('value')
+      .eq('key', 'daily_briefing')
+      .single(),
   ])
 
   const pnl = pnlResult.data ?? []
@@ -105,6 +113,9 @@ export default async function CEOOverviewPage() {
   const channelPnl = channelPnlResult.data ?? []
   const shopifyDaily = shopifyResult.data?.[0]
   const revenueDaily = revenueDailyResult.data ?? []
+  const briefingRaw = briefingResult.data?.value as
+    | { text?: string; generated_at?: string; valid?: boolean }
+    | null
 
   const cashflowLatest = (await supabase
     .from('fin_cashflow_monthly')
@@ -184,6 +195,13 @@ export default async function CEOOverviewPage() {
   const cacDenominator = newCustomers > 0 ? newCustomers : totalOrders
   const blendedCac = calcBlendedCac(Math.abs(adSpend), cacDenominator)
 
+  const ltv = calcSimplifiedLtv(
+    latestRevenue ?? 0,
+    newCustomers > 0 ? newCustomers : cacDenominator,
+    grossMargin ?? 50,
+  )
+  const ltvCacRatio = calcLtvCacRatio(ltv, blendedCac)
+
   // 13-Week Forecast Minimum
   const forecastCashValues = latestForecastRows
     .map((f) => Number(f.projected_ending_cash))
@@ -261,13 +279,11 @@ export default async function CEOOverviewPage() {
       />
 
       <div className="px-6 pb-4">
-        <Card>
-          <CardContent className="flex items-center justify-center py-8">
-            <p className="text-sm text-muted-foreground">
-              AI-generated morning briefing will be available in Phase 5
-            </p>
-          </CardContent>
-        </Card>
+        <BriefingCard
+          text={briefingRaw?.text ?? null}
+          generatedAt={briefingRaw?.generated_at ?? null}
+          valid={briefingRaw?.valid ?? true}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-4 px-6 pb-4 md:grid-cols-4">
@@ -321,7 +337,11 @@ export default async function CEOOverviewPage() {
           value={
             blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'
           }
-          subtitle="LTV:CAC available Phase 3"
+          subtitle={
+            ltvCacRatio !== null
+              ? `LTV:CAC ${ltvCacRatio.toFixed(1)}x`
+              : undefined
+          }
         />
         <MetricCard
           title="13-Week Min"

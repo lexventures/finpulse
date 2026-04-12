@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const VALID_SOURCES = ['finaloop', 'kpi_facts', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast'] as const
+const VALID_SOURCES = ['finaloop', 'kpi_facts', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast', 'briefing'] as const
 type SyncSource = (typeof VALID_SOURCES)[number]
 
 const FUNCTION_NAMES: Record<SyncSource, string> = {
@@ -10,6 +10,7 @@ const FUNCTION_NAMES: Record<SyncSource, string> = {
   shopify_wholesale: 'sync-shopify-wholesale',
   shopify_analytics: 'sync-shopify-analytics',
   cash_forecast: 'run-cash-forecast',
+  briefing: 'generate-briefing',
 }
 
 interface InvokeResult {
