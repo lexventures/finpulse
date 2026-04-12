@@ -11,15 +11,6 @@ const FUNCTION_NAMES: Record<SyncSource, string> = {
   shopify_analytics: 'sync-shopify-analytics',
 }
 
-function isResponseLike(value: unknown): value is Response {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'status' in value &&
-    'text' in value
-  )
-}
-
 export async function POST(
   _request: NextRequest,
   props: { params: Promise<{ source: string }> },
@@ -34,54 +25,69 @@ export async function POST(
   }
 
   const functionName = FUNCTION_NAMES[source as SyncSource]
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  // #region agent log — H1/H2: capture env state
+  const _dbg = {
+    hasUrl: Boolean(supabaseUrl),
+    urlPrefix: supabaseUrl?.substring(0, 30) ?? '(unset)',
+    hasKey: Boolean(serviceRoleKey),
+    keyPrefix: serviceRoleKey ? `${serviceRoleKey.substring(0, 12)}...len=${serviceRoleKey.length}` : '(unset)',
+  }
+  // #endregion
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json(
+      { error: 'Missing Supabase configuration', _dbg },
+      { status: 500 },
+    )
+  }
 
   try {
-    const supabase = createServiceClient()
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body: {},
-    })
+    const res = await fetch(
+      `${supabaseUrl}/functions/v1/${functionName}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      },
+    )
 
-    if (error) {
-      const maybeContext = (error as { context?: unknown }).context
-      let status = 500
-      let functionError: unknown = null
+    // #region agent log — H3/H4: capture raw response
+    const rawBody = await res.text()
+    let parsedBody: unknown = null
+    try { parsedBody = JSON.parse(rawBody) } catch { parsedBody = rawBody }
 
-      if (isResponseLike(maybeContext)) {
-        status = maybeContext.status || 500
-        const raw = await maybeContext.text()
-        try {
-          functionError = JSON.parse(raw)
-        } catch {
-          functionError = raw
-        }
-      }
+    const _dbgResponse = {
+      status: res.status,
+      statusText: res.statusText,
+      contentType: res.headers.get('content-type'),
+      bodyLength: rawBody.length,
+      bodyPreview: rawBody.substring(0, 500),
+    }
+    // #endregion
 
-      const extractedError =
-        typeof functionError === 'object' &&
-        functionError !== null &&
-        'error' in functionError &&
-        typeof (functionError as { error?: unknown }).error === 'string'
-          ? (functionError as { error: string }).error
-          : null
-
-      const topLevelError = extractedError
-        ? `${functionName} failed (${status}): ${extractedError}`
-        : `${functionName} failed (${status}): ${error.message || 'Sync function invocation failed'}`
-
+    if (!res.ok) {
       return NextResponse.json(
         {
-          error: topLevelError,
+          error: `${functionName} failed (${res.status}): ${typeof parsedBody === 'object' && parsedBody && 'error' in parsedBody ? (parsedBody as { error: string }).error : rawBody.substring(0, 200)}`,
           function_name: functionName,
-          function_status: status,
-          function_error: functionError,
+          function_status: res.status,
+          function_error: parsedBody,
+          _dbg,
+          _dbgResponse,
         },
-        { status },
+        { status: res.status },
       )
     }
 
-    return NextResponse.json({ success: true, result: data })
+    return NextResponse.json({ success: true, result: parsedBody })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message, _dbg }, { status: 500 })
   }
 }
