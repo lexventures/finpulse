@@ -41,10 +41,12 @@ interface MonthMeta {
 }
 const WHOLESALE_SUB: Channel[] = [...WHOLESALE_SUBCHANNELS]
 
-// Subtotal / header rows that should never be accumulated
+// Subtotal / header rows that should never be accumulated.
+// NOTE: "Gross Profit", "Expenses", "Operating Expenses" are handled as zone
+// transitions in parsePnl and must NOT appear here (they'd be skipped before
+// the zone tracker sees them).
 const SKIP_ROW_PATTERNS = [
   /^total\b/i,
-  /^gross\s*profit/i,
   /^net\s*(income|profit|revenue|sales|loss)/i,
   /^operating\s*(income|profit|loss)/i,
   /^ebitda/i,
@@ -52,9 +54,6 @@ const SKIP_ROW_PATTERNS = [
   /^contribution\s*margin/i,
   /^cost of goods sold$/i,
   /^revenue$/i,
-  /^expenses?$/i,
-  /^operating expenses?$/i,
-  /^other\s*(income|expenses?)$/i,
 ]
 
 // Company-only patterns for opex / below-the-line items.
@@ -521,9 +520,11 @@ function parsePnl(sheet: SheetValues): PnlResult {
   const unrecognizedTotals = new Map<string, number>()
   const warnings: string[] = []
 
-  // Section context: when a section header is found (e.g. "Shipping & fulfillment"),
-  // all subsequent vendor-level lines that don't match any rule are assigned to this field.
-  // Reset to null when a channel-level or new section header is hit.
+  // P&L zone tracking: once we pass "Gross Profit" or "Cost of goods sold" totals,
+  // we're in the operating expenses area. Any vendor line here that doesn't match
+  // a specific rule is a legitimate expense — default to the active section or
+  // other_income_expenses rather than marking "unrecognized".
+  let inExpenseZone = false
   let activeSection: keyof CompanyExtras | null = null
 
   for (let r = headerRow + 1; r < data.length; r++) {
@@ -539,6 +540,19 @@ function parsePnl(sheet: SheetValues): PnlResult {
       activeSection = null
       continue
     }
+
+    // Detect transition into expense zone via structural markers
+    if (/^gross\s*profit/i.test(lineItem) || /^operating expenses?$/i.test(lineItem) || /^expenses?$/i.test(lineItem)) {
+      inExpenseZone = true
+      activeSection = null
+      continue
+    }
+    if (/^other\s*(income|expenses?)\s*((&|and)\s*(income|expenses?))?\s*$/i.test(lineItem)) {
+      inExpenseZone = true
+      activeSection = 'other_income_expenses'
+      continue
+    }
+
     if (SKIP_ROW_PATTERNS.some((p) => p.test(lineItem))) {
       if (/^total\b/i.test(lineItem)) activeSection = null
       continue
@@ -591,7 +605,18 @@ function parsePnl(sheet: SheetValues): PnlResult {
       continue
     }
 
-    // Truly unrecognized — track for operator review, do not auto-book.
+    // In the expense zone, any unmatched vendor line is a real expense —
+    // book it to other_income_expenses rather than flagging unrecognized.
+    if (inExpenseZone) {
+      for (const m of months) {
+        const value = parseNumber(row[m.colIndex], r, m.colIndex)
+        if (value === 0) continue
+        accByMonth.get(m.month)!.extras.other_income_expenses += value
+      }
+      continue
+    }
+
+    // Pre-expense-zone unrecognized — track for operator review.
     let hasValue = false
     let rowTotal = 0
     for (const m of months) {
