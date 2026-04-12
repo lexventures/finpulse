@@ -68,6 +68,7 @@ export default async function DTCPage(props: {
     supabase
       .from('fin_shopify_analytics')
       .select('*')
+      .eq('store', 'emilylex')
       .gte('date', startDate)
       .order('date', { ascending: true }),
   ])

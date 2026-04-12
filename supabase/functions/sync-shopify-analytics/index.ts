@@ -123,15 +123,18 @@ Deno.serve(async (req) => {
     .single()
   const syncId = syncLog?.id ?? ''
 
+  const dtcShop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
+
   const { data: session, error: sessionError } = await supabase
     .from('shopify_sessions')
     .select('access_token, shop')
     .eq('is_online', false)
+    .eq('shop', dtcShop)
     .limit(1)
     .single()
 
   if (sessionError || !session?.access_token) {
-    const msg = sessionError?.message ?? 'No offline Shopify session found'
+    const msg = sessionError?.message ?? `No offline Shopify session found for ${dtcShop}`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -180,6 +183,7 @@ Deno.serve(async (req) => {
         .filter((r) => r.date)
         .map((r) => ({
           date: r.date,
+          store: 'emilylex',
           net_sales: round(r.net_sales),
           gross_sales: round(r.gross_sales),
           total_sales: round(r.total_sales),
@@ -198,7 +202,7 @@ Deno.serve(async (req) => {
         const chunk = upsertData.slice(i, i + 500)
         const { error } = await supabase
           .from('fin_shopify_analytics')
-          .upsert(chunk, { onConflict: 'date' })
+          .upsert(chunk, { onConflict: 'date,store' })
         if (error) throw new Error(`Upsert failed: ${error.message}`)
       }
 

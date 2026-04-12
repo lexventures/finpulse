@@ -251,8 +251,6 @@ function aggregateOrders(orders: OrderNode[]): Aggregation {
   }
 
   for (const order of orders) {
-    if (order.sourceName === 'faire') continue
-
     const totalPrice = parseFloat(order.totalPriceSet.shopMoney.amount)
     const discounts = parseFloat(order.totalDiscountsSet.shopMoney.amount)
 
@@ -305,18 +303,23 @@ Deno.serve(async (req) => {
 
   const syncId: string = syncLog?.id ?? ''
 
+  // INVENTORY: emilylex store ONLY. Never pull from elsw.
+  // The wholesale store shares the same inventory pool.
+  const dtcShop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
+
   // Load offline session
   const { data: session, error: sessionError } = await supabase
     .from('shopify_sessions')
     .select('access_token, shop')
     .eq('is_online', false)
+    .eq('shop', dtcShop)
     .limit(1)
     .single()
 
   if (sessionError || !session?.access_token) {
     const msg = sessionError
       ? `Failed to load Shopify session: ${sessionError.message}`
-      : 'No offline Shopify session found'
+      : `No offline Shopify session found for ${dtcShop}`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -435,7 +438,6 @@ Deno.serve(async (req) => {
           date: targetDate,
           orders_processed: orders.length,
           orders_aggregated: agg.order_count,
-          skipped_faire: orders.length - agg.order_count,
           gross_revenue: round2(agg.gross_revenue),
           net_revenue: round2(agg.net_revenue),
           incoming_inventory_value: inventory.incoming_inventory_value,
