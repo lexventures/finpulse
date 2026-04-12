@@ -121,13 +121,14 @@ function durationStr(started: string, completed: string | null): string {
   return `${mins}m ${rem}s`
 }
 
-const SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics'] as const
+const SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast'] as const
 
 const SOURCE_LABELS: Record<string, string> = {
   finaloop: 'Finaloop',
   shopify_dtc: 'Shopify DTC',
   shopify_wholesale: 'Shopify Wholesale',
   shopify_analytics: 'Shopify Analytics',
+  cash_forecast: 'Cash Forecast',
 }
 
 async function getSessionTokenForRequest(): Promise<string> {
