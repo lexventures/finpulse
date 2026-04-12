@@ -13,6 +13,7 @@ const SettingsSchema = z.object({
   finaloop_pnl_sheet_id: z.string().optional(),
   finaloop_balance_sheet_id: z.string().optional(),
   finaloop_cashflow_sheet_id: z.string().optional(),
+  pin_protected_pages: z.array(z.string()).optional(),
 })
 
 export async function POST(request: NextRequest) {
@@ -58,6 +59,9 @@ export async function POST(request: NextRequest) {
   }
   if (parsed.data.finaloop_cashflow_sheet_id !== undefined) {
     settingsToSave.push({ key: 'finaloop_cashflow_sheet_id', value: parsed.data.finaloop_cashflow_sheet_id })
+  }
+  if (parsed.data.pin_protected_pages !== undefined) {
+    settingsToSave.push({ key: 'pin_protected_pages', value: parsed.data.pin_protected_pages })
   }
 
   for (const s of settingsToSave) {

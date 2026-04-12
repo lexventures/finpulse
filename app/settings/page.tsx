@@ -43,6 +43,7 @@ export default async function SettingsPage() {
           'shipping_allocation_method',
           'notification_email',
           'pin_hash',
+          'pin_protected_pages',
           'finaloop_pnl_sheet_id',
           'finaloop_balance_sheet_id',
           'finaloop_cashflow_sheet_id',
@@ -66,6 +67,7 @@ export default async function SettingsPage() {
       typeof pinHashVal === 'string'
         ? pinHashVal.length > 0
         : Boolean(pinHashVal),
+    pin_protected_pages: getSettingValue<string[]>(settingsRows, 'pin_protected_pages') ?? ['/team', '/scenarios'],
     finaloop_pnl_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_pnl_sheet_id'),
     finaloop_balance_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_balance_sheet_id'),
     finaloop_cashflow_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_cashflow_sheet_id'),

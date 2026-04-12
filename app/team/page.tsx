@@ -14,6 +14,7 @@ import {
 } from '@/lib/utils/format'
 import { PinGate } from './pin-gate'
 import { EmployeeTable } from './employee-table'
+import { isPageProtected } from '@/lib/pin-protection'
 
 function formatMonthLabel(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
@@ -23,8 +24,9 @@ function formatMonthLabel(dateStr: string): string {
 export default async function TeamPage() {
   const cookieStore = await cookies()
   const pinVerified = cookieStore.get('pin_verified')
+  const needsPin = await isPageProtected('/team')
 
-  if (!pinVerified) {
+  if (needsPin && !pinVerified) {
     return (
       <>
         <PageHeader title="Headcount & Labor" />

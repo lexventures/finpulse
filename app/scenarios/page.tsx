@@ -8,6 +8,7 @@ import { PinGate } from '@/app/team/pin-gate'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScenarioCreator } from './scenario-creator'
+import { isPageProtected } from '@/lib/pin-protection'
 
 const TYPE_LABELS: Record<string, string> = {
   ad_spend: 'Ad Spend',
@@ -19,7 +20,8 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default async function ScenariosPage() {
   const cookieStore = await cookies()
-  const pinVerified = Boolean(cookieStore.get('pin_verified'))
+  const needsPin = await isPageProtected('/scenarios')
+  const pinVerified = needsPin ? Boolean(cookieStore.get('pin_verified')) : true
   const supabase = createServiceClient()
 
   const [scenariosResult, pnlResult] = await Promise.all([

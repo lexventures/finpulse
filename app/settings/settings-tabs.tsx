@@ -74,6 +74,7 @@ interface SettingsValues {
   alert_digest_email?: string
   sync_failure_email?: string
   pin_hash_set?: boolean
+  pin_protected_pages?: string[]
   finaloop_pnl_sheet_id?: string
   finaloop_balance_sheet_id?: string
   finaloop_cashflow_sheet_id?: string
@@ -456,7 +457,10 @@ export function SettingsTabs({
         {/* Tab 7: PIN Management */}
         <TabsContent value={7}>
           <div className="pt-4">
-            <PinManagement hasPin={settings.pin_hash_set ?? false} />
+            <PinManagement
+              hasPin={settings.pin_hash_set ?? false}
+              protectedPages={settings.pin_protected_pages ?? ['/team', '/scenarios']}
+            />
           </div>
         </TabsContent>
       </Tabs>
@@ -722,13 +726,61 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
   )
 }
 
-function PinManagement({ hasPin }: { hasPin: boolean }) {
+const PIN_PAGE_OPTIONS = [
+  { path: '/team', label: 'Team (Headcount & Labor)' },
+  { path: '/scenarios', label: 'Scenarios' },
+  { path: '/cash', label: 'Cash Flow' },
+  { path: '/settings', label: 'Settings' },
+  { path: '/', label: 'CEO Overview' },
+  { path: '/dtc', label: 'DTC' },
+  { path: '/wholesale', label: 'Wholesale' },
+  { path: '/marketplaces', label: 'Marketplaces' },
+  { path: '/retail', label: 'Retail' },
+  { path: '/inventory', label: 'Inventory' },
+]
+
+function PinManagement({
+  hasPin,
+  protectedPages,
+}: {
+  hasPin: boolean
+  protectedPages: string[]
+}) {
   const [newPin, setNewPin] = useState('')
   const [confirmPin, setConfirmPin] = useState('')
   const [pinHint, setPinHint] = useState('')
+  const [selectedPages, setSelectedPages] = useState<string[]>(protectedPages)
   const [saving, setSaving] = useState(false)
+  const [savingPages, setSavingPages] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [pagesMessage, setPagesMessage] = useState('')
+
+  function togglePage(path: string) {
+    setSelectedPages((prev) =>
+      prev.includes(path)
+        ? prev.filter((p) => p !== path)
+        : [...prev, path],
+    )
+    setPagesMessage('')
+  }
+
+  async function handleSavePages() {
+    setSavingPages(true)
+    setPagesMessage('')
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin_protected_pages: selectedPages }),
+      })
+      setPagesMessage('Saved')
+    } catch {
+      setPagesMessage('Failed to save')
+    } finally {
+      setSavingPages(false)
+    }
+  }
 
   async function handleSetPin(e: FormEvent) {
     e.preventDefault()
@@ -767,80 +819,130 @@ function PinManagement({ hasPin }: { hasPin: boolean }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>PIN Management</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 max-w-md">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Status:</span>
-          {hasPin ? (
-            <Badge
-              variant="outline"
-              className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400"
-            >
-              PIN Set
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-muted-foreground">
-              No PIN Set
-            </Badge>
-          )}
-        </div>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>PIN Protection</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-md">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Status:</span>
+            {hasPin ? (
+              <Badge
+                variant="outline"
+                className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400"
+              >
+                PIN Set
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground">
+                No PIN Set
+              </Badge>
+            )}
+          </div>
 
-        <form onSubmit={handleSetPin} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">
-              {hasPin ? 'New PIN' : 'Set PIN'}
-            </label>
-            <Input
-              type="password"
-              maxLength={8}
-              minLength={8}
-              value={newPin}
-              onChange={(e) => setNewPin(e.target.value)}
-              placeholder="8-character PIN"
-            />
-            <p className="text-xs text-muted-foreground">
-              Letters, numbers, or a mix. Exactly 8 characters.
-            </p>
+          <form onSubmit={handleSetPin} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                {hasPin ? 'New PIN' : 'Set PIN'}
+              </label>
+              <Input
+                type="password"
+                maxLength={8}
+                minLength={8}
+                value={newPin}
+                onChange={(e) => setNewPin(e.target.value)}
+                placeholder="8-character PIN"
+              />
+              <p className="text-xs text-muted-foreground">
+                Letters, numbers, or a mix. Exactly 8 characters.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Confirm PIN</label>
+              <Input
+                type="password"
+                maxLength={8}
+                minLength={8}
+                value={confirmPin}
+                onChange={(e) => setConfirmPin(e.target.value)}
+                placeholder="Re-enter PIN"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Hint (optional)</label>
+              <Input
+                type="text"
+                maxLength={100}
+                value={pinHint}
+                onChange={(e) => setPinHint(e.target.value)}
+                placeholder="e.g. favorite coffee order"
+              />
+              <p className="text-xs text-muted-foreground">
+                Shown after a failed attempt to help you remember
+              </p>
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            {message && (
+              <p className="text-sm text-emerald-600">{message}</p>
+            )}
+            <Button
+              type="submit"
+              disabled={saving || newPin.length !== 8 || !confirmPin}
+            >
+              {saving ? 'Saving...' : hasPin ? 'Change PIN' : 'Set PIN'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Protected Pages</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Select which pages require PIN entry. PIN must be set first.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-md">
+          <div className="space-y-2">
+            {PIN_PAGE_OPTIONS.map((page) => (
+              <label
+                key={page.path}
+                className="flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedPages.includes(page.path)}
+                  onChange={() => togglePage(page.path)}
+                  disabled={!hasPin}
+                  className="size-4 rounded border-input accent-primary"
+                />
+                <span className="text-sm">{page.label}</span>
+                <span className="ml-auto text-xs text-muted-foreground font-mono">
+                  {page.path}
+                </span>
+              </label>
+            ))}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Confirm PIN</label>
-            <Input
-              type="password"
-              maxLength={8}
-              minLength={8}
-              value={confirmPin}
-              onChange={(e) => setConfirmPin(e.target.value)}
-              placeholder="Re-enter PIN"
-            />
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={handleSavePages}
+              disabled={savingPages || !hasPin}
+              variant="outline"
+            >
+              {savingPages ? 'Saving...' : 'Save Page Settings'}
+            </Button>
+            {pagesMessage && (
+              <span className={cn(
+                'text-sm',
+                pagesMessage === 'Saved' ? 'text-emerald-600' : 'text-destructive',
+              )}>
+                {pagesMessage}
+              </span>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Hint (optional)</label>
-            <Input
-              type="text"
-              maxLength={100}
-              value={pinHint}
-              onChange={(e) => setPinHint(e.target.value)}
-              placeholder="e.g. favorite coffee order"
-            />
-            <p className="text-xs text-muted-foreground">
-              Shown after a failed attempt to help you remember
-            </p>
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {message && (
-            <p className="text-sm text-emerald-600">{message}</p>
-          )}
-          <Button
-            type="submit"
-            disabled={saving || newPin.length !== 8 || !confirmPin}
-          >
-            {saving ? 'Saving...' : hasPin ? 'Change PIN' : 'Set PIN'}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
