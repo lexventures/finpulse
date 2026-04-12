@@ -4,6 +4,12 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { PageHeader } from '@/components/layout/page-header'
 import { SettingsTabs } from './settings-tabs'
 
+function getSettingValue<T>(rows: Array<{ key: string; value: unknown }>, key: string): T | undefined {
+  const row = rows.find((r) => r.key === key)
+  if (!row) return undefined
+  return row.value as T
+}
+
 export default async function SettingsPage() {
   const supabase = createServiceClient()
 
@@ -31,30 +37,39 @@ export default async function SettingsPage() {
         .from('fin_settings')
         .select('key, value')
         .in('key', [
-          'channel_config',
+          'key_account_gross_margin',
+          'faire_commission_rate',
+          'faire_monthly_ad_budget',
+          'shipping_allocation_method',
           'notification_email',
           'pin_hash',
+          'finaloop_pnl_sheet_id',
+          'finaloop_balance_sheet_id',
+          'finaloop_cashflow_sheet_id',
+          'google_service_account_email',
         ]),
     ])
 
   const settingsRows = settingsResult.data ?? []
-  const channelConfig =
-    (settingsRows.find((r) => r.key === 'channel_config')?.value as Record<string, unknown>) ?? {}
   const notificationEmails =
-    (settingsRows.find((r) => r.key === 'notification_email')?.value as Record<string, unknown>) ?? {}
-  const pinHashVal = settingsRows.find((r) => r.key === 'pin_hash')?.value
+    (getSettingValue<Record<string, unknown>>(settingsRows, 'notification_email')) ?? {}
+  const pinHashVal = getSettingValue<unknown>(settingsRows, 'pin_hash')
 
   const settings = {
-    faire_commission_rate: channelConfig.faire_commission_rate as number | undefined,
-    faire_monthly_ad_budget: channelConfig.faire_monthly_ad_budget as number | undefined,
-    key_account_gross_margin: channelConfig.key_account_gross_margin as number | undefined,
-    shipping_allocation_method: channelConfig.shipping_allocation_method as string | undefined,
+    faire_commission_rate: getSettingValue<number>(settingsRows, 'faire_commission_rate'),
+    faire_monthly_ad_budget: getSettingValue<number>(settingsRows, 'faire_monthly_ad_budget'),
+    key_account_gross_margin: getSettingValue<number>(settingsRows, 'key_account_gross_margin'),
+    shipping_allocation_method: getSettingValue<string>(settingsRows, 'shipping_allocation_method'),
     alert_digest_email: notificationEmails.alert_digest_email as string | undefined,
     sync_failure_email: notificationEmails.sync_failure_email as string | undefined,
     pin_hash_set:
       typeof pinHashVal === 'string'
         ? pinHashVal.length > 0
         : Boolean(pinHashVal),
+    finaloop_pnl_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_pnl_sheet_id'),
+    finaloop_balance_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_balance_sheet_id'),
+    finaloop_cashflow_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_cashflow_sheet_id'),
+    google_service_account_email: getSettingValue<string>(settingsRows, 'google_service_account_email'),
   }
 
   return (
