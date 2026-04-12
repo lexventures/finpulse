@@ -324,17 +324,17 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header Bar */}
-      <div className="bg-[#e8594f] text-white">
+      <div className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Financial Health Dashboard</h1>
-            <p className="text-xs text-white/80 mt-0.5">
+            <h1 className="text-xl font-bold tracking-tight text-gray-800">Financial Health Dashboard</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
               13-Week Cash Flow &middot; Gross-to-Net Bridge &middot; AP/AR Aging &middot; Burn Rate &middot; Runway &middot; Tax Reserve
             </p>
           </div>
           <Link
             href="/settings"
-            className="p-2 rounded-lg hover:bg-white/20 transition-colors"
+            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
             title="Settings"
           >
             <Settings className="size-5" />
