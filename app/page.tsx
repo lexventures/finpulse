@@ -141,14 +141,13 @@ export default async function DashboardPage() {
   // ---- KPI HEADER CALCULATIONS ----
   const latestBs = bs[0]
   const cashPosition = latestBs?.cash_and_equivalents ?? 0
-  const inventoryValue = latestBs?.inventory_value ?? 0
-  const fivePercentReserve = inventoryValue * 0.05
-
-  const completedCf = cf.filter((_r, i) => i > 0 || true).slice(0, 3)
+  // Use trailing 3 completed months of cash flow (skip index 0 if it might be partial/current)
+  const completedCf = cf.slice(0, 3)
   const avgNetCashFlow = completedCf.length > 0
     ? completedCf.reduce((s, r) => s + (r.net_cash_flow ?? 0), 0) / completedCf.length
     : 0
-  const weeklyBurnRate = Math.abs(avgNetCashFlow) / WEEKS_PER_MONTH
+  // Burn rate: only meaningful when net cash flow is negative (company is spending more than earning)
+  const weeklyBurnRate = avgNetCashFlow < 0 ? Math.abs(avgNetCashFlow) / WEEKS_PER_MONTH : 0
   const runwayWeeks = weeklyBurnRate > 0 ? Math.floor(cashPosition / weeklyBurnRate) : 999
 
   const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
@@ -256,7 +255,8 @@ export default async function DashboardPage() {
       balance: Math.max(0, cashPosition - latestBurn * i),
     }
   })
-  const dangerBalance = latestBurn * 2
+  // Danger zone: 2 months of burn as minimum safe cash balance
+  const dangerThreshold = latestBurn * 2
 
   // ---- AP AGING BUCKETS ----
   const now = new Date()
@@ -338,7 +338,7 @@ export default async function DashboardPage() {
         {/* Section 3: Gross-to-Net Revenue Bridge */}
         <Card>
           <CardHeader>
-            <CardTitle>Gross-to-Net Revenue Bridge &mdash; Last 30 Days</CardTitle>
+            <CardTitle>Gross-to-Net Revenue Bridge &mdash; Last Completed Month</CardTitle>
             <CardDescription>Where your top-line revenue goes before it hits the bank. Each bar shows what&apos;s subtracted from gross sales to arrive at net cash collected.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -385,7 +385,7 @@ export default async function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Monthly Burn Rate Trend</CardTitle>
-              <CardDescription>Total monthly cash outflows (operating + PO + tax reserves).</CardDescription>
+              <CardDescription>Total monthly cash outflows (operating expenses + cost of goods sold).</CardDescription>
             </CardHeader>
             <CardContent>
               {burnData.length > 0 ? (
@@ -402,7 +402,7 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent>
               {runwayData.length > 0 ? (
-                <RunwayAreaChart data={runwayData} dangerWeeks={dangerBalance} />
+                <RunwayAreaChart data={runwayData} dangerThreshold={dangerThreshold} />
               ) : (
                 <p className="text-sm text-muted-foreground py-8 text-center">No runway data.</p>
               )}

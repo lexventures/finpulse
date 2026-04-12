@@ -428,7 +428,7 @@ export function SettingsTabs({
           <div className="pt-4">
             <PinManagement
               hasPin={settings.pin_hash_set ?? false}
-              protectedPages={settings.pin_protected_pages ?? ['/team', '/scenarios']}
+              protectedPages={settings.pin_protected_pages ?? ['/settings']}
             />
           </div>
         </TabsContent>
@@ -513,7 +513,7 @@ export function SettingsTabs({
                     Go to <strong>Settings &rarr; Dashboard</strong> tab and click <strong>Run Sync</strong> on the Finaloop card.
                     The sync will pull data from the Google Sheets, parse it, atomically update all three finance statements,
                     and rebuild the KPI fact layer used by the app.
-                    After a successful sync, the CEO Overview and channel pages will show real data.
+                    After a successful sync, the dashboard will show real data.
                   </p>
                 </div>
               </CardContent>
@@ -951,16 +951,8 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
 }
 
 const PIN_PAGE_OPTIONS = [
-  { path: '/team', label: 'Team (Headcount & Labor)' },
-  { path: '/scenarios', label: 'Scenarios' },
-  { path: '/cash', label: 'Cash Flow' },
+  { path: '/', label: 'Dashboard' },
   { path: '/settings', label: 'Settings' },
-  { path: '/', label: 'CEO Overview' },
-  { path: '/dtc', label: 'DTC' },
-  { path: '/wholesale', label: 'Wholesale' },
-  { path: '/marketplaces', label: 'Marketplaces' },
-  { path: '/retail', label: 'Retail' },
-  { path: '/inventory', label: 'Inventory' },
 ]
 
 function PinManagement({
@@ -973,7 +965,9 @@ function PinManagement({
   const [newPin, setNewPin] = useState('')
   const [confirmPin, setConfirmPin] = useState('')
   const [pinHint, setPinHint] = useState('')
-  const [selectedPages, setSelectedPages] = useState<string[]>(protectedPages)
+  const [selectedPages, setSelectedPages] = useState<string[]>(
+    protectedPages.filter((p) => PIN_PAGE_OPTIONS.some((o) => o.path === p)),
+  )
   const [saving, setSaving] = useState(false)
   const [savingPages, setSavingPages] = useState(false)
   const [message, setMessage] = useState('')

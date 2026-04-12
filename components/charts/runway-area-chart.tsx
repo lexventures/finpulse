@@ -18,7 +18,7 @@ interface RunwayMonth {
 
 interface RunwayAreaChartProps {
   data: RunwayMonth[]
-  dangerWeeks?: number
+  dangerThreshold?: number
 }
 
 const fmtK = (v: number) => '$' + Math.round(v / 1000) + 'k'
@@ -34,14 +34,7 @@ function RunwayTooltip({ active, payload, label }: Record<string, unknown>) {
   )
 }
 
-export function RunwayAreaChart({ data, dangerWeeks }: RunwayAreaChartProps) {
-  const dangerBalance = dangerWeeks != null && data.length > 0
-    ? data.reduce((min, d) => Math.min(min, d.balance), Infinity) +
-      (dangerWeeks / 52) *
-        (data.reduce((max, d) => Math.max(max, d.balance), -Infinity) -
-          data.reduce((min, d) => Math.min(min, d.balance), Infinity))
-    : undefined
-
+export function RunwayAreaChart({ data, dangerThreshold }: RunwayAreaChartProps) {
   return (
     <ResponsiveContainer width="100%" height={300}>
       <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
@@ -56,13 +49,13 @@ export function RunwayAreaChart({ data, dangerWeeks }: RunwayAreaChartProps) {
         <YAxis tickFormatter={fmtK} tick={{ fontSize: 12 }} />
         <Tooltip content={<RunwayTooltip />} />
 
-        {dangerBalance != null && (
+        {dangerThreshold != null && dangerThreshold > 0 && (
           <ReferenceLine
-            y={dangerBalance}
+            y={dangerThreshold}
             stroke="#ef4444"
             strokeDasharray="6 3"
             label={{
-              value: `Danger Zone: ${dangerWeeks} weeks`,
+              value: `Danger Zone (${fmtK(dangerThreshold)})`,
               position: 'insideTopRight',
               fill: '#ef4444',
               fontSize: 11,
