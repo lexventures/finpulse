@@ -1,6 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-const API_VERSION = '2025-04'
+const API_VERSION = '2025-10'
 const RETRY_DELAYS = [1000, 4000, 16000]
 const MAX_ATTEMPTS = 4
 
