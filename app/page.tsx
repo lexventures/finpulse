@@ -3,8 +3,9 @@ export const dynamic = 'force-dynamic'
 import { createServiceClient } from '@/lib/supabase/server'
 import { PageHeader } from '@/components/layout/page-header'
 import { MetricCard } from '@/components/cards/metric-card'
-import { FinAreaChart } from '@/components/charts/area-chart'
-import { CashBurndownChart } from '@/components/charts/cash-burndown'
+import { RevenueBarChart } from '@/components/charts/revenue-bar-chart'
+import { ChannelMixChart } from '@/components/charts/channel-mix-chart'
+import { CashRunwayChart } from '@/components/charts/cash-runway-chart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   formatCompact,
@@ -492,31 +493,39 @@ export default async function CEOOverviewPage() {
       : null
 
   const WHOLESALE_KEYS_SET = new Set(['wholesale_faire', 'wholesale_direct', 'wholesale_key'])
-  const monthSet = new Set(pnl.slice(0, 12).reverse().map((m) => String(m.month)))
-  const channelTrendMap = new Map<string, Record<string, number>>()
 
-  for (const month of monthSet) {
-    const entry: Record<string, number> = {}
-    channelTrendMap.set(month, entry)
-  }
+  const DISPLAY_CHANNELS: Array<{ key: string; label: string; color: string }> = [
+    { key: 'dtc', label: 'DTC', color: 'hsl(var(--chart-1))' },
+    { key: 'wholesale', label: 'Wholesale', color: 'hsl(var(--chart-2))' },
+    { key: 'retail', label: 'Retail', color: 'hsl(var(--chart-5))' },
+    { key: 'marketplace', label: 'Marketplace', color: 'hsl(210 70% 55%)' },
+  ]
+
+  const latestChannelRevenues = new Map<string, number>()
+  const priorChannelRevenues = new Map<string, number>()
+  const priorMonthStr = pnl.length >= 2 ? String(pnl[1].month) : null
 
   for (const row of channelPnl) {
     const m = String(row.month)
-    if (!channelTrendMap.has(m)) continue
-    const entry = channelTrendMap.get(m)!
     const ch = row.channel as string
     const rev = Math.max(0, Number(row.net_revenue) || 0)
-    if (WHOLESALE_KEYS_SET.has(ch)) {
-      entry.wholesale = (entry.wholesale ?? 0) + rev
-    } else if (ch !== 'wholesale') {
-      entry[ch] = (entry[ch] ?? 0) + rev
+    const bucket = WHOLESALE_KEYS_SET.has(ch) ? 'wholesale' : ch === 'wholesale' ? null : ch
+    if (!bucket) continue
+
+    if (m === latestMonth) {
+      latestChannelRevenues.set(bucket, (latestChannelRevenues.get(bucket) ?? 0) + rev)
+    } else if (m === priorMonthStr) {
+      priorChannelRevenues.set(bucket, (priorChannelRevenues.get(bucket) ?? 0) + rev)
     }
   }
 
-  const channelTrend = [...monthSet].sort().map((m) => ({
-    month: formatMonthLabel(m),
-    ...channelTrendMap.get(m),
-  }))
+  const channelTotal = [...latestChannelRevenues.values()].reduce((s, v) => s + v, 0)
+  const channelMixData = DISPLAY_CHANNELS.map(({ key, label, color }) => {
+    const val = latestChannelRevenues.get(key) ?? 0
+    const prior = priorChannelRevenues.get(key) ?? 0
+    const momPct = prior > 0 ? ((val - prior) / prior) * 100 : null
+    return { label, value: val, color, momPct }
+  }).filter((d) => d.value > 0)
 
   const last12 = pnl.slice(0, 12).reverse()
   const revenueTrend = last12.map((m) => {
@@ -526,11 +535,10 @@ export default async function CEOOverviewPage() {
     pyDate.setFullYear(d.getFullYear() - 1)
     const pyKey = `${pyDate.getFullYear()}-${String(pyDate.getMonth() + 1).padStart(2, '0')}-01`
     const pyRow = pnl.find((p) => String(p.month) === pyKey)
-    return {
-      month: formatMonthLabel(monthStr),
-      revenue: Number(m.net_revenue) || 0,
-      priorYear: pyRow ? Number(pyRow.net_revenue) || 0 : 0,
-    }
+    const rev = Number(m.net_revenue) || 0
+    const py = pyRow ? Number(pyRow.net_revenue) || 0 : 0
+    const yoyPct = py > 0 ? ((rev - py) / py) * 100 : null
+    return { month: formatMonthLabel(monthStr), revenue: rev, priorYear: py, yoyPct }
   })
 
   const cashRunwayData = latestForecastRows.map((f) => ({
@@ -771,62 +779,32 @@ export default async function CEOOverviewPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 px-6 pb-4 lg:grid-cols-3">
-        <Card>
+      <div className="grid gap-4 px-6 pb-4 lg:grid-cols-5">
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle>Revenue vs Prior Year</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RevenueBarChart data={revenueTrend} />
+          </CardContent>
+        </Card>
+        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Channel Revenue Mix</CardTitle>
           </CardHeader>
           <CardContent>
-            <FinAreaChart
-              data={channelTrend}
-              xKey="month"
-              yKeys={[
-                { key: 'dtc', label: 'DTC', color: 'hsl(var(--chart-1))' },
-                { key: 'wholesale', label: 'Wholesale', color: 'hsl(var(--chart-2))' },
-                { key: 'retail', label: 'Retail', color: 'hsl(var(--chart-5))' },
-                { key: 'marketplace', label: 'Marketplace', color: 'hsl(210 70% 55%)' },
-              ]}
-              empty={channelTrend.length === 0}
-              stacked
-              showLegend
-              formatYAxis="compact"
-            />
+            <ChannelMixChart data={channelMixData} total={channelTotal} />
           </CardContent>
         </Card>
+      </div>
+
+      <div className="px-6 pb-4">
         <Card>
           <CardHeader>
-            <CardTitle>Revenue Trend</CardTitle>
+            <CardTitle>13-Week Cash Runway</CardTitle>
           </CardHeader>
           <CardContent>
-            <FinAreaChart
-              data={revenueTrend}
-              xKey="month"
-              yKeys={[
-                {
-                  key: 'revenue',
-                  label: 'Net Revenue',
-                  color: 'hsl(var(--chart-1))',
-                },
-                {
-                  key: 'priorYear',
-                  label: 'Prior Year',
-                  color: 'hsl(0 0% 60%)',
-                  dashed: true,
-                },
-              ]}
-              empty={revenueTrend.length === 0}
-              gradientFill
-              showLegend
-              formatYAxis="compact"
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Cash Runway</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CashBurndownChart data={cashRunwayData} />
+            <CashRunwayChart data={cashRunwayData} />
           </CardContent>
         </Card>
       </div>
