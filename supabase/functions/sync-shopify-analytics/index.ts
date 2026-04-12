@@ -43,7 +43,7 @@ async function shopifyGraphQL<T>(
 const SHOPIFYQL_QUERY = `
   query ShopifyQLAnalytics($query: String!) {
     shopifyqlQuery(query: $query) {
-      ... on ShopifyqlResponse {
+      ... on ShopifyqlQueryResponse {
         tableData {
           columns { name dataType }
           rows
