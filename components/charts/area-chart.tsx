@@ -6,6 +6,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  Legend,
   ReferenceLine,
 } from 'recharts'
 import {
@@ -28,6 +29,7 @@ interface FinAreaChartProps {
   referenceLines?: Array<{ y: number; label: string; color: string }>
   gradientFill?: boolean
   stacked?: boolean
+  showLegend?: boolean
   className?: string
   yAxisTickFormatter?: (value: number) => string
 }
@@ -43,6 +45,7 @@ export function FinAreaChart({
   referenceLines,
   gradientFill = true,
   stacked = false,
+  showLegend = false,
   className,
   yAxisTickFormatter,
 }: FinAreaChartProps) {
@@ -104,6 +107,14 @@ export function FinAreaChart({
           tickFormatter={yAxisTickFormatter}
         />
         <ChartTooltip content={<ChartTooltipContent />} />
+        {showLegend && (
+          <Legend
+            verticalAlign="bottom"
+            iconType="circle"
+            iconSize={8}
+            wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+          />
+        )}
         {referenceLines?.map((ref, i) => (
           <ReferenceLine
             key={i}
@@ -118,19 +129,30 @@ export function FinAreaChart({
             }}
           />
         ))}
-        {yKeys.map(({ key, color, dashed }) => (
-          <Area
-            key={key}
-            type="monotone"
-            dataKey={key}
-            stackId={stacked ? 'stack' : undefined}
-            stroke={color}
-            strokeWidth={2}
-            strokeDasharray={dashed ? '6 3' : undefined}
-            fill={gradientFill ? `url(#fill-${key})` : 'transparent'}
-            dot={false}
-          />
-        ))}
+        {yKeys.map(({ key, color, dashed }) => {
+          const useSolidFill = stacked && !dashed
+          const fillValue = dashed
+            ? 'transparent'
+            : useSolidFill
+              ? color
+              : gradientFill
+                ? `url(#fill-${key})`
+                : 'transparent'
+          return (
+            <Area
+              key={key}
+              type="monotone"
+              dataKey={key}
+              stackId={stacked ? 'stack' : undefined}
+              stroke={color}
+              strokeWidth={2}
+              strokeDasharray={dashed ? '6 3' : undefined}
+              fill={fillValue}
+              fillOpacity={useSolidFill ? 0.7 : 1}
+              dot={false}
+            />
+          )
+        })}
       </AreaChart>
     </ChartContainer>
   )

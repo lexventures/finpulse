@@ -787,8 +787,9 @@ export default async function CEOOverviewPage() {
                 { key: 'marketplace', label: 'Marketplace', color: 'hsl(210 70% 55%)' },
               ]}
               empty={channelTrend.length === 0}
-              gradientFill
               stacked
+              showLegend
+              yAxisTickFormatter={(v) => formatCompact(v)}
             />
           </CardContent>
         </Card>
@@ -809,12 +810,14 @@ export default async function CEOOverviewPage() {
                 {
                   key: 'priorYear',
                   label: 'Prior Year',
-                  color: 'hsl(var(--muted-foreground))',
+                  color: 'hsl(0 0% 60%)',
                   dashed: true,
                 },
               ]}
               empty={revenueTrend.length === 0}
               gradientFill
+              showLegend
+              yAxisTickFormatter={(v) => formatCompact(v)}
             />
           </CardContent>
         </Card>

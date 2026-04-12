@@ -18,6 +18,22 @@ export function CashBurndownChart({ data }: CashBurndownChartProps) {
     cash: d.cash,
   })) as Array<Record<string, unknown>>
 
+  const minCash = data.length > 0 ? Math.min(...data.map((d) => d.cash)) : 0
+
+  const refs: Array<{ y: number; label: string; color: string }> = []
+  if (minCash < 200_000) {
+    refs.push({ y: 0, label: '$0', color: 'hsl(0 72% 51%)' })
+  }
+  if (minCash < 200_000) {
+    refs.push({ y: 50_000, label: '$50K', color: 'hsl(48 96% 53%)' })
+  }
+
+  const lineColor = minCash < 0
+    ? 'hsl(0 72% 51%)'
+    : minCash < 50_000
+      ? 'hsl(48 96% 53%)'
+      : 'hsl(var(--chart-1))'
+
   return (
     <FinAreaChart
       data={chartData}
@@ -26,16 +42,13 @@ export function CashBurndownChart({ data }: CashBurndownChartProps) {
         {
           key: 'cash',
           label: 'Projected cash',
-          color: 'hsl(var(--chart-1))',
+          color: lineColor,
         },
       ]}
       height={200}
       empty={data.length === 0}
       gradientFill
-      referenceLines={[
-        { y: 0, label: '$0', color: 'hsl(0 72% 51%)' },
-        { y: 50_000, label: '$50k', color: 'hsl(48 96% 53%)' },
-      ]}
+      referenceLines={refs.length > 0 ? refs : undefined}
       yAxisTickFormatter={(v) => formatCompact(Number(v))}
     />
   )
