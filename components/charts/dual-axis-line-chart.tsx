@@ -74,7 +74,7 @@ export function DualAxisLineChart({ data }: DualAxisLineChartProps) {
           dataKey="totalLeakage"
           fill="url(#leakageFill)"
           stroke="transparent"
-          name="Total Leakage"
+          legendType="none"
         />
         <Line
           yAxisId="right"

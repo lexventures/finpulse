@@ -15,14 +15,6 @@ import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
 
 const WEEKS_PER_MONTH = 4.33
 
-function fmt(n: number | null | undefined): string {
-  if (n == null) return '$0'
-  const abs = Math.abs(n)
-  if (abs >= 1_000_000) return (n < 0 ? '-' : '') + '$' + (abs / 1_000_000).toFixed(1) + 'M'
-  if (abs >= 1_000) return (n < 0 ? '-' : '') + '$' + Math.round(abs / 1_000).toLocaleString() + 'k' 
-  return '$' + Math.round(n).toLocaleString()
-}
-
 function fmtFull(n: number | null | undefined): string {
   if (n == null) return '$0'
   return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -287,8 +279,6 @@ export default async function DashboardPage() {
   // ---- CASH POSITION SUMMARY ----
   const lowestForecast = Math.min(...forecastData.map((w) => w.projectedBalance))
   const netTaxReserve = weeklyTax * 13
-  const weeklyBurnNet = weeklyOpex + weeklyPo + weeklyTax
-  const weeksOfRunway = weeklyBurnNet > 0 ? Math.floor(cashPosition / weeklyBurnNet) : 999
 
   const summaryHealthy = lowestForecast > 0 && runwayWeeks > 8
   const summaryColor = summaryHealthy ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
@@ -518,12 +508,12 @@ export default async function DashboardPage() {
           <h3 className="font-bold text-base mb-2">Cash Position Summary</h3>
           <p className="text-sm leading-relaxed">
             Cash remains {summaryHealthy ? 'positive' : 'at risk'} through the 13-week window.
-            Lowest projected balance is {fmtFull(lowestForecast)} (Wk {forecastData.findIndex((w) => w.projectedBalance === lowestForecast) + 1}).
-            Total AP outstanding is {fmtFull(totalApOutstanding)} and selling open POs against AR of {fmtFull(totalArOutstanding)}, leaving a net
+            Lowest projected balance is {fmtFull(lowestForecast)} (Week {forecastData.findIndex((w) => w.projectedBalance === lowestForecast) + 1}).
+            Total AP outstanding is {fmtFull(totalApOutstanding)} against AR of {fmtFull(totalArOutstanding)}, leaving a net
             payables gap of {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}.
             Tax reserve accruing at {fmtFull(netTaxReserve)} over 13 weeks at {fmtFull(weeklyTax)}/wk effective rate.
-            Weekly burn of {fmtFull(weeklyBurnNet)} gives {weeksOfRunway} weeks of runway from today&apos;s cash position.
-            {runwayWeeks < 12 ? ' Watch Weeks 9-11 — proactive collections or PO deferral recommended.' : ''}
+            Weekly burn of {fmtFull(weeklyBurnRate)} gives {runwayWeeks} weeks of runway from today&apos;s cash position.
+            {runwayWeeks < 12 ? ' Watch Weeks 9\u201311 \u2014 proactive collections or PO deferral recommended.' : ''}
           </p>
         </div>
       </div>
