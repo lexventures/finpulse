@@ -274,9 +274,22 @@ function emptyExtras(): CompanyExtras {
   }
 }
 
+function feeAccumulatorField(lineItem: string): keyof ChannelAccumulator {
+  const n = lineItem.toLowerCase()
+  // Finaloop uses "Selling fees - …" vs "Fees - Shopify …" (payment processing). Only the
+  // former should hit selling_fees; the old pattern.startsWith('selling') missed mapped rows
+  // whose pattern is "Fees - Shopify - …".
+  if (/\bselling\s+fees\b/.test(n) || (n.includes('selling') && n.includes('fee'))) {
+    return 'selling_fees'
+  }
+  // Standalone "Faire" fee row (channel-mapping) is marketplace commission / selling-type fees
+  if (n === 'faire') return 'selling_fees'
+  return 'processing_fees'
+}
+
 function accumulatorField(
   type: LineItemType,
-  pattern: string,
+  lineItem: string,
 ): keyof ChannelAccumulator {
   switch (type) {
     case 'revenue': return 'gross_revenue'
@@ -285,9 +298,7 @@ function accumulatorField(
     case 'return': return 'returns'
     case 'cogs': return 'cogs'
     case 'fee':
-      return pattern.toLowerCase().startsWith('selling')
-        ? 'selling_fees'
-        : 'processing_fees'
+      return feeAccumulatorField(lineItem)
     case 'ad_spend': return 'allocated_ad_spend'
     case 'email_marketing': return 'allocated_email_marketing'
   }
@@ -563,7 +574,7 @@ function parsePnl(sheet: SheetValues): PnlResult {
 
     if (mapping) {
       activeSection = null
-      const field = accumulatorField(mapping.type, mapping.pattern)
+      const field = accumulatorField(mapping.type, lineItem)
       for (const m of months) {
         const value = parseNumber(row[m.colIndex], r, m.colIndex)
         if (value === 0) continue

@@ -77,10 +77,13 @@ export const CHANNEL_MAPPINGS: ChannelMapping[] = [
   { pattern: 'Cost of goods sold - Faire (via Shopify)', channel: 'wholesale_faire', type: 'cogs' },
   { pattern: 'Cost of goods sold - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'cogs' },
 
-  // Fees
+  // Fees (type 'fee': sync splits selling_fees vs processing_fees from the row label)
   { pattern: 'Fees - Shopify - emilylex', channel: 'dtc', type: 'fee' },
+  { pattern: 'Selling fees - Shopify - emilylex', channel: 'dtc', type: 'fee' },
+  { pattern: 'Selling fees - Facebook (via Shopify)', channel: 'dtc', type: 'fee' },
   { pattern: 'Selling fees - Faire', channel: 'wholesale_faire', type: 'fee' },
   { pattern: 'Fees - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'fee' },
+  { pattern: 'Selling fees - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'fee' },
   { pattern: 'Chargeback protection - Shopify - emilylex', channel: 'dtc', type: 'fee' },
   { pattern: 'Dispute fees - Shopify - emilylex', channel: 'dtc', type: 'fee' },
   { pattern: 'Disputes - Shopify - emilylex', channel: 'dtc', type: 'fee' },
