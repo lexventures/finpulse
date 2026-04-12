@@ -314,6 +314,12 @@ async function getGoogleAccessToken(email: string, privateKeyPem: string): Promi
   return data.access_token as string
 }
 
+function extractSheetId(input: string): string {
+  if (!input) return ''
+  const match = input.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  return match ? match[1] : input.replace(/['"]/g, '').trim()
+}
+
 // ---------------------------------------------------------------------------
 // Google Sheets API
 // ---------------------------------------------------------------------------
@@ -619,10 +625,38 @@ Deno.serve(async (req) => {
   }
   const saKey = saKeyRaw.replace(/\\n/g, '\n')
 
+  // Load Sheet IDs: query params > env vars > fin_settings
   const url = new URL(req.url)
-  const spreadsheetId = url.searchParams.get('sheet_id') ?? Deno.env.get('FINALOOP_SHEET_ID') ?? ''
-  if (!spreadsheetId) {
-    const msg = 'Missing spreadsheet ID (set FINALOOP_SHEET_ID or pass ?sheet_id=)'
+  let pnlSheetId = url.searchParams.get('pnl_sheet_id') ?? Deno.env.get('FINALOOP_PNL_SHEET_ID') ?? ''
+  let bsSheetId = url.searchParams.get('bs_sheet_id') ?? Deno.env.get('FINALOOP_BALANCE_SHEET_ID') ?? ''
+  let cfSheetId = url.searchParams.get('cf_sheet_id') ?? Deno.env.get('FINALOOP_CASHFLOW_SHEET_ID') ?? ''
+
+  // Fallback: single sheet ID for all three (legacy)
+  const legacyId = url.searchParams.get('sheet_id') ?? Deno.env.get('FINALOOP_SHEET_ID') ?? ''
+
+  // If any are missing, try reading from fin_settings
+  if (!pnlSheetId || !bsSheetId || !cfSheetId) {
+    const { data: settingsRows } = await supabase
+      .from('fin_settings')
+      .select('key, value')
+      .in('key', ['finaloop_pnl_sheet_id', 'finaloop_balance_sheet_id', 'finaloop_cashflow_sheet_id'])
+
+    const settingsMap = new Map(
+      (settingsRows ?? []).map((r: { key: string; value: unknown }) => [r.key, r.value]),
+    )
+
+    if (!pnlSheetId) pnlSheetId = extractSheetId(String(settingsMap.get('finaloop_pnl_sheet_id') ?? ''))
+    if (!bsSheetId) bsSheetId = extractSheetId(String(settingsMap.get('finaloop_balance_sheet_id') ?? ''))
+    if (!cfSheetId) cfSheetId = extractSheetId(String(settingsMap.get('finaloop_cashflow_sheet_id') ?? ''))
+  }
+
+  // Apply legacy fallback
+  if (!pnlSheetId) pnlSheetId = legacyId
+  if (!bsSheetId) bsSheetId = legacyId
+  if (!cfSheetId) cfSheetId = legacyId
+
+  if (!pnlSheetId) {
+    const msg = 'Missing P&L Sheet ID. Set it in Settings > Channels > Data Sources, or via FINALOOP_PNL_SHEET_ID env var.'
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -635,6 +669,9 @@ Deno.serve(async (req) => {
   const pnlTab = Deno.env.get('FINALOOP_PNL_TAB') ?? 'Profit & Loss'
   const bsTab = Deno.env.get('FINALOOP_BS_TAB') ?? 'Balance Sheet'
   const cfTab = Deno.env.get('FINALOOP_CF_TAB') ?? 'Cash Flow'
+
+  // Determine if all three are in the same spreadsheet or separate
+  const allSameSheet = pnlSheetId === bsSheetId && bsSheetId === cfSheetId
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -649,13 +686,36 @@ Deno.serve(async (req) => {
       // 1. Google auth
       const accessToken = await getGoogleAccessToken(saEmail, saKey)
 
-      // 2. Fetch all three sheets
-      const sheets = await fetchSheets(accessToken, spreadsheetId, [pnlTab, bsTab, cfTab])
-      if (sheets.length < 1) throw new Error('No sheets returned from batchGet')
+      // 2. Fetch sheets (same spreadsheet or separate)
+      let pnlSheet: SheetValues | null = null
+      let bsSheet: SheetValues | null = null
+      let cfSheet: SheetValues | null = null
 
-      const pnlSheet = sheets[0]
-      const bsSheet = sheets.length > 1 ? sheets[1] : null
-      const cfSheet = sheets.length > 2 ? sheets[2] : null
+      if (allSameSheet) {
+        const tabs = [pnlTab]
+        if (bsSheetId) tabs.push(bsTab)
+        if (cfSheetId) tabs.push(cfTab)
+        const sheets = await fetchSheets(accessToken, pnlSheetId, tabs)
+        pnlSheet = sheets[0] ?? null
+        bsSheet = sheets[1] ?? null
+        cfSheet = sheets[2] ?? null
+      } else {
+        const [pnlSheets] = await Promise.all([
+          fetchSheets(accessToken, pnlSheetId, [pnlTab]),
+        ])
+        pnlSheet = pnlSheets[0] ?? null
+
+        if (bsSheetId) {
+          const bsSheets = await fetchSheets(accessToken, bsSheetId, [bsTab])
+          bsSheet = bsSheets[0] ?? null
+        }
+        if (cfSheetId) {
+          const cfSheets = await fetchSheets(accessToken, cfSheetId, [cfTab])
+          cfSheet = cfSheets[0] ?? null
+        }
+      }
+
+      if (!pnlSheet) throw new Error('No P&L sheet data returned')
 
       // 3. Parse P&L
       const pnl = parsePnl(pnlSheet)
