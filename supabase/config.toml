@@ -1,0 +1,32 @@
+# Edge Function gateway JWT verification breaks when using non-JWT API keys (e.g. sb_secret_…)
+# or asymmetric user JWTs — the loader tries to parse Authorization as a legacy JWT and returns
+# 401 "Invalid Token or Protected Header formatting" before your code runs.
+# These functions are invoked from the Next.js app (service role) or pg_cron, not from Supabase Auth users.
+# See: https://supabase.com/docs/guides/functions/function-configuration
+
+[functions.sync-finaloop-sheets]
+verify_jwt = false
+
+[functions.run-kpi-facts]
+verify_jwt = false
+
+[functions.run-cash-forecast]
+verify_jwt = false
+
+[functions.sync-shopify-dtc]
+verify_jwt = false
+
+[functions.sync-shopify-wholesale]
+verify_jwt = false
+
+[functions.sync-shopify-analytics]
+verify_jwt = false
+
+[functions.run-alert-engine]
+verify_jwt = false
+
+[functions.generate-briefing]
+verify_jwt = false
+
+[functions.send-alert-digest]
+verify_jwt = false

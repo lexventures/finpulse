@@ -115,15 +115,21 @@ Run local migrations:
 supabase db push
 ```
 
-Deploy functions (example):
+Deploy functions: **`supabase/config.toml` sets `verify_jwt = false`** for every function the Next.js sync route and pg_cron call. Without it, the Edge gateway tries to parse `Authorization: Bearer <service_role>` as a legacy JWT; **new secret keys (`sb_secret_…`) or rotated signing keys** then fail with `401 Invalid Token or Protected Header formatting` before your handler runs. Redeploy after changing `config.toml`.
 
 ```bash
-supabase functions deploy sync-finaloop-sheets --no-verify-jwt
-supabase functions deploy run-kpi-facts --no-verify-jwt
-supabase functions deploy run-cash-forecast --no-verify-jwt
-supabase functions deploy run-alert-engine --no-verify-jwt
-supabase functions deploy generate-briefing --no-verify-jwt
+supabase functions deploy sync-finaloop-sheets
+supabase functions deploy run-kpi-facts
+supabase functions deploy run-cash-forecast
+supabase functions deploy sync-shopify-dtc
+supabase functions deploy sync-shopify-wholesale
+supabase functions deploy sync-shopify-analytics
+supabase functions deploy run-alert-engine
+supabase functions deploy generate-briefing
+supabase functions deploy send-alert-digest
 ```
+
+Or deploy all: `supabase functions deploy` (uses `config.toml` per function).
 
 ## Notes
 

@@ -28,12 +28,14 @@ async function invokeEdgeFunction(
   serviceRoleKey: string,
   functionName: string,
 ): Promise<InvokeResult> {
+  const key = serviceRoleKey.trim()
   const res = await fetch(
     `${supabaseUrl}/functions/v1/${functionName}`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${key}`,
+        apikey: key,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
