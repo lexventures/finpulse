@@ -123,6 +123,27 @@ function formatWeekLabel(weekNum: number, weekStart: string): string {
   return `Wk ${weekNum} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
 }
 
+function fmtAsOfMonth(month: string | undefined): string {
+  if (!month) return '—'
+  return new Date(month + 'T12:00:00Z').toLocaleDateString('en-US', {
+    month: 'short',
+    year: '2-digit',
+  })
+}
+
+/** Matches run-cash-forecast: balance sheet cash first; CF ending only when BS cash is 0. */
+function forecastStartingCash(
+  bsCash: number,
+  cfEnding: number | null | undefined,
+): number {
+  let s = Number(bsCash) || 0
+  if (s === 0) {
+    const ec = cfEnding
+    if (typeof ec === 'number' && !Number.isNaN(ec)) s = ec
+  }
+  return s
+}
+
 function buildFallbackForecast(params: {
   startingCash: number
   weeklyInflow: number
@@ -216,10 +237,7 @@ export default async function DashboardPage() {
   const latestBs = bs[0]
   const cashPosition = latestBs?.cash_and_equivalents ?? 0
   const cashFromCf = cf[0]?.ending_cash
-  const startingCashForDisplay =
-    typeof cashFromCf === 'number' && !Number.isNaN(cashFromCf) && cashFromCf !== 0
-      ? cashFromCf
-      : cashPosition
+  const startingCashForForecast = forecastStartingCash(cashPosition, cashFromCf)
 
   const companyPnl = pnl.filter((r) => r.channel === 'company' && !r.is_partial)
   const latestCompanyPnl = companyPnl[0]
@@ -239,7 +257,8 @@ export default async function DashboardPage() {
     ? trailing3Pnl.reduce((s, r) => s + monthlyBurn(r), 0) / trailing3Pnl.length
     : 0
   const weeklyBurnRate = avgMonthlyBurn / WEEKS_PER_MONTH
-  const runwayWeeks = weeklyBurnRate > 0 ? Math.floor(cashPosition / weeklyBurnRate) : 999
+  const runwayWeeks =
+    weeklyBurnRate > 0 ? Math.floor(startingCashForForecast / weeklyBurnRate) : 999
 
   const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
 
@@ -305,7 +324,7 @@ export default async function DashboardPage() {
     }))
   } else {
     forecastData = buildFallbackForecast({
-      startingCash: startingCashForDisplay,
+      startingCash: startingCashForForecast,
       weeklyInflow,
       weeklyTotalOutflow: weeklyTotalOutflowFallback,
     })
@@ -397,7 +416,14 @@ export default async function DashboardPage() {
   }
   const latestMonth = companyPnl[0]?.month
   const channelPnlLatest = latestMonth
-    ? pnl.filter((r) => r.month === latestMonth && r.channel !== 'company' && r.channel !== 'wholesale' && r.gross_revenue > 0)
+    ? pnl.filter(
+        (r) =>
+          r.month === latestMonth &&
+          !r.is_partial &&
+          r.channel !== 'company' &&
+          r.channel !== 'wholesale' &&
+          r.gross_revenue > 0,
+      )
     : []
   const leakageData = channelPnlLatest.map((r) => ({
     channel: channelNames[r.channel] ?? r.channel,
@@ -424,7 +450,7 @@ export default async function DashboardPage() {
     d.setMonth(d.getMonth() + i)
     return {
       month: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-      balance: Math.max(0, cashPosition - avgMonthlyBurn * i),
+      balance: Math.max(0, startingCashForForecast - avgMonthlyBurn * i),
     }
   })
   const dangerThreshold = avgMonthlyBurn * 2
@@ -471,6 +497,10 @@ export default async function DashboardPage() {
             <p className="text-xs text-gray-500 mt-0.5">
               13-Week Cash Flow &middot; Net sales &amp; contribution bridges &middot; AP/AR &middot; Burn &amp; runway
             </p>
+            <p className="text-[10px] text-gray-400 mt-1 tabular-nums">
+              As of: P&amp;L {fmtAsOfMonth(latestCompanyPnl?.month)} · Balance sheet{' '}
+              {fmtAsOfMonth(latestBs?.month)} · Cash flow {fmtAsOfMonth(cf[0]?.month)}
+            </p>
           </div>
           <Link
             href="/settings"
@@ -487,19 +517,23 @@ export default async function DashboardPage() {
           <KpiCard
             label="CASH POSITION"
             value={fmtFull(cashPosition)}
-            sub="Balance sheet cash &amp; equivalents (latest month)"
+            sub={
+              cashPosition === 0 && startingCashForForecast > 0
+                ? `BS $0 (${fmtAsOfMonth(latestBs?.month)}); runway/forecast use CF ending ${fmtAsOfMonth(cf[0]?.month)}`
+                : `Balance sheet cash & equivalents (${fmtAsOfMonth(latestBs?.month)})`
+            }
             color="blue"
           />
           <KpiCard
             label="WEEKLY BURN RATE"
             value={`${fmtFull(weeklyBurnRate)}/wk`}
-            sub="COGS + opex + other + interest (trailing 3 mo avg)"
+            sub={`COGS + opex + other + interest · last 3 completed mo through ${fmtAsOfMonth(companyPnl[0]?.month)}`}
             color="red"
           />
           <KpiCard
             label="RUNWAY"
             value={`${runwayWeeks} weeks`}
-            sub="At trailing avg burn, no new revenue"
+            sub={`${fmtFull(startingCashForForecast)} starting cash (same rule as cash forecast) · burn through ${fmtAsOfMonth(companyPnl[0]?.month)}`}
             color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'}
           />
           <KpiCard
@@ -511,7 +545,7 @@ export default async function DashboardPage() {
           <KpiCard
             label="NET SALES % OF GROSS"
             value={fmtPct(netSalesOfGrossPct)}
-            sub="net revenue ÷ gross (Finaloop P&amp;L)"
+            sub={`net revenue ÷ gross · company P&amp;L ${fmtAsOfMonth(latestCompanyPnl?.month)}`}
             color="blue"
           />
         </div>
@@ -770,8 +804,9 @@ export default async function DashboardPage() {
             {fmtFull(totalApOutstanding)} against AR of {fmtFull(totalArOutstanding)}, net payables gap{' '}
             {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}. Tax-related estimate (13 weeks):{' '}
             {fmtFull(netTaxReserve)} at ~{fmtFull(weeklyTax)}/wk when cash flow tax lines are empty (else from Finaloop cash flow).
-            Weekly burn {fmtFull(weeklyBurnRate)} implies ~{runwayWeeks} weeks runway at current balance if burn and no inflows
-            continue. {runwayWeeks < 12 ? 'Review collections and payables timing.' : ''}
+            Weekly burn {fmtFull(weeklyBurnRate)} implies ~{runwayWeeks} weeks runway at {fmtFull(startingCashForForecast)} starting
+            cash (balance sheet, or cash-flow ending when BS cash is $0), if burn and no inflows continue.{' '}
+            {runwayWeeks < 12 ? 'Review collections and payables timing.' : ''}
           </p>
         </div>
       </div>

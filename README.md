@@ -51,11 +51,13 @@ Unmapped rows are no longer auto-booked into `other_income_expenses`.
 
 ## Sync Orchestration
 
-Manual `finaloop` sync from the app now runs in fixed order:
+Manual `finaloop` sync from the app issues **one** request to `sync-finaloop-sheets`, which then runs in order:
 
-1. `sync-finaloop-sheets`
-2. `run-kpi-facts`
+1. `sync-finaloop-sheets` (Sheets → `fin_pnl_monthly`, balance sheet, cash flow)
+2. `run-kpi-facts` (`rebuild_fin_kpi_monthly`)
 3. `run-cash-forecast`
+
+That keeps KPI facts and the cash forecast aligned whenever Finaloop data is refreshed—including direct or cron invocations of the Edge function (not only the Next.js API).
 
 Manual `kpi_facts` sync runs:
 

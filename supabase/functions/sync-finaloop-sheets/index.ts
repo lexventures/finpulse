@@ -139,6 +139,38 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+async function invokeSiblingFunction(functionName: string): Promise<{
+  ok: boolean
+  status: number
+  parsedBody: unknown
+}> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!.trim()
+  const res = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      apikey: key,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
+  const rawBody = await res.text()
+  let parsedBody: unknown = rawBody
+  try {
+    parsedBody = JSON.parse(rawBody)
+  } catch {
+    parsedBody = rawBody
+  }
+  return { ok: res.ok, status: res.status, parsedBody }
+}
+
+function rowsFromFunctionResult(parsedBody: unknown): number {
+  if (typeof parsedBody !== 'object' || parsedBody === null) return 0
+  const rows = (parsedBody as Record<string, unknown>).rows
+  return typeof rows === 'number' ? rows : 0
+}
+
 function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -1056,13 +1088,65 @@ Deno.serve(async (req) => {
         error_message: notes.length > 0 ? notes.join(' | ') : null,
       }).eq('id', syncId)
 
+      const pipeline: Array<{
+        function_name: string
+        function_status: number
+        ok: boolean
+        result: unknown
+      }> = [
+        {
+          function_name: 'sync-finaloop-sheets',
+          function_status: 200,
+          ok: true,
+          result: {
+            success: true,
+            status,
+            rows: totalRows,
+            warnings: pnl.warnings,
+            unrecognized: pnl.unrecognized,
+          },
+        },
+      ]
+
+      const kpiStep = await invokeSiblingFunction('run-kpi-facts')
+      pipeline.push({
+        function_name: 'run-kpi-facts',
+        function_status: kpiStep.status,
+        ok: kpiStep.ok,
+        result: kpiStep.parsedBody,
+      })
+
+      let fcStep: { ok: boolean; status: number; parsedBody: unknown }
+      if (kpiStep.ok) {
+        fcStep = await invokeSiblingFunction('run-cash-forecast')
+      } else {
+        fcStep = {
+          ok: false,
+          status: 0,
+          parsedBody: { error: 'skipped: run-kpi-facts failed' },
+        }
+      }
+      pipeline.push({
+        function_name: 'run-cash-forecast',
+        function_status: fcStep.status,
+        ok: fcStep.ok,
+        result: fcStep.parsedBody,
+      })
+
+      const downstreamRows = rowsFromFunctionResult(kpiStep.parsedBody) +
+        rowsFromFunctionResult(fcStep.parsedBody)
+      const anyDownstreamFail = pipeline.some((p) => !p.ok)
+      const mergedStatus =
+        status !== 'success' || anyDownstreamFail ? 'partial' : 'success'
+
       return new Response(
         JSON.stringify({
           success: true,
-          status,
-          rows: totalRows,
+          status: mergedStatus,
+          rows: totalRows + downstreamRows,
           warnings: pnl.warnings,
           unrecognized: pnl.unrecognized,
+          pipeline,
         }),
         { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )

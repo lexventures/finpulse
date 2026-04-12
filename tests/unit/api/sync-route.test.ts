@@ -28,19 +28,31 @@ describe('POST /api/sync/[source]', () => {
   })
 
   it('runs the finaloop pipeline in deterministic order', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          success: true,
-          status: 'partial',
-          rows: 12,
-          warnings: ['revenue recon drift'],
-          unrecognized: [{ lineItem: 'Unknown line', total: 1200 }],
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse({ success: true, rows: 32 }))
-      .mockResolvedValueOnce(mockJsonResponse({ success: true, rows: 13 }))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      mockJsonResponse({
+        success: true,
+        status: 'partial',
+        rows: 57,
+        warnings: ['revenue recon drift'],
+        unrecognized: [{ lineItem: 'Unknown line', total: 1200 }],
+        pipeline: [
+          {
+            function_name: 'sync-finaloop-sheets',
+            function_status: 200,
+            ok: true,
+            result: {
+              success: true,
+              status: 'partial',
+              rows: 12,
+              warnings: ['revenue recon drift'],
+              unrecognized: [{ lineItem: 'Unknown line', total: 1200 }],
+            },
+          },
+          { function_name: 'run-kpi-facts', function_status: 200, ok: true, result: { rows: 32 } },
+          { function_name: 'run-cash-forecast', function_status: 200, ok: true, result: { rows: 13 } },
+        ],
+      }),
+    )
 
     const res = await POST(
       new NextRequest('https://app.local/api/sync/finaloop', { method: 'POST' }),
@@ -53,18 +65,33 @@ describe('POST /api/sync/[source]', () => {
     expect(body.result.status).toBe('partial')
     expect(body.result.rows).toBe(57)
 
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(String(fetchSpy.mock.calls[0][0])).toContain('/functions/v1/sync-finaloop-sheets')
-    expect(String(fetchSpy.mock.calls[1][0])).toContain('/functions/v1/run-kpi-facts')
-    expect(String(fetchSpy.mock.calls[2][0])).toContain('/functions/v1/run-cash-forecast')
   })
 
   it('returns the failing step when a downstream function fails', async () => {
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(mockJsonResponse({ success: true, rows: 10 }))
-      .mockResolvedValueOnce(
-        mockJsonResponse({ error: 'kpi rebuild failed' }, 500),
-      )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      mockJsonResponse({
+        success: true,
+        status: 'partial',
+        rows: 10,
+        pipeline: [
+          { function_name: 'sync-finaloop-sheets', function_status: 200, ok: true, result: { rows: 10 } },
+          {
+            function_name: 'run-kpi-facts',
+            function_status: 500,
+            ok: false,
+            result: { error: 'kpi rebuild failed' },
+          },
+          {
+            function_name: 'run-cash-forecast',
+            function_status: 0,
+            ok: false,
+            result: { error: 'skipped: run-kpi-facts failed' },
+          },
+        ],
+      }),
+    )
 
     const res = await POST(
       new NextRequest('https://app.local/api/sync/finaloop', { method: 'POST' }),
