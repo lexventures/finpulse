@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
-          data-api-key={process.env.SHOPIFY_API_KEY || ''}
+          data-api-key={process.env.SHOPIFY_CLIENT_ID || ''}
         />
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">

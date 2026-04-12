@@ -47,7 +47,7 @@ export default async function DTCPage(props: {
   const startDate = toISODate(start)
 
   const supabase = createServiceClient()
-  const [pnlResult, dailyResult, membershipResult] = await Promise.all([
+  const [pnlResult, dailyResult, membershipResult, analyticsResult] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
       .select('*')
@@ -65,14 +65,21 @@ export default async function DTCPage(props: {
       .select('*')
       .gte('date', startDate)
       .order('date', { ascending: true }),
+    supabase
+      .from('fin_shopify_analytics')
+      .select('*')
+      .gte('date', startDate)
+      .order('date', { ascending: true }),
   ])
 
   const pnlData = pnlResult.data ?? []
   const dailyData = dailyResult.data ?? []
   const membershipData = membershipResult.data ?? []
+  const analyticsData = analyticsResult.data ?? []
   const noDaily = dailyData.length === 0
   const noPnl = pnlData.length === 0
   const noMembership = membershipData.length === 0
+  const noAnalytics = analyticsData.length === 0
 
   // Revenue trend
   const revenueChartData = dailyData.map((d) => ({
@@ -145,6 +152,21 @@ export default async function DTCPage(props: {
     date: formatDateLabel(d.date as string),
     member: Number(d.member_avg_order_value) || 0,
     nonMember: Number(d.non_member_avg_order_value) || 0,
+  }))
+
+  // Funnel & conversion metrics
+  const latestAnalytics = analyticsData.at(-1)
+  const conversionRate = latestAnalytics ? Number(latestAnalytics.conversion_rate) * 100 : null
+  const cartAbandonmentRate = latestAnalytics ? Number(latestAnalytics.cart_abandonment_rate) * 100 : null
+
+  const conversionChartData = analyticsData.map((d) => ({
+    date: formatDateLabel(d.date as string),
+    conversion: (Number(d.conversion_rate) || 0) * 100,
+  }))
+
+  const sessionsChartData = analyticsData.map((d) => ({
+    date: formatDateLabel(d.date as string),
+    sessions: Number(d.sessions) || 0,
   }))
 
   return (
@@ -246,6 +268,53 @@ export default async function DTCPage(props: {
                   },
                 ]}
                 empty={noDaily}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section className="space-y-4 px-6 pb-6">
+        <h2 className="text-lg font-semibold">Funnel &amp; Conversion</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <MetricCard
+            title="Conversion Rate"
+            value={conversionRate !== null ? formatPercent(conversionRate) : '\u2014'}
+            subtitle="Sessions to orders"
+            alert={conversionRate !== null ? (conversionRate < 1.5 ? 'red' : conversionRate < 2.5 ? 'yellow' : 'green') : undefined}
+          />
+          <MetricCard
+            title="Cart Abandonment"
+            value={cartAbandonmentRate !== null ? formatPercent(cartAbandonmentRate) : '\u2014'}
+            subtitle="Carts not completed"
+            alert={cartAbandonmentRate !== null ? (cartAbandonmentRate > 80 ? 'red' : cartAbandonmentRate > 70 ? 'yellow' : 'green') : undefined}
+          />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Conversion Rate Trend</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FinLineChart
+                data={conversionChartData}
+                xKey="date"
+                yKeys={[{ key: 'conversion', label: 'Conversion %', color: 'hsl(var(--chart-1))' }]}
+                empty={noAnalytics}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions Trend</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FinAreaChart
+                data={sessionsChartData}
+                xKey="date"
+                yKeys={[{ key: 'sessions', label: 'Sessions', color: 'hsl(var(--chart-3))' }]}
+                empty={noAnalytics}
+                gradientFill
               />
             </CardContent>
           </Card>

@@ -61,10 +61,10 @@ export function ensureShopify(): FinPulseShopify {
   }
 
   if (!shopifyInstance) {
-    const apiKey = process.env.SHOPIFY_API_KEY
-    const apiSecretKey = process.env.SHOPIFY_API_SECRET
+    const apiKey = process.env.SHOPIFY_CLIENT_ID
+    const apiSecretKey = process.env.SHOPIFY_CLIENT_SECRET
     if (!apiKey || !apiSecretKey) {
-      throw new Error('SHOPIFY_API_KEY and SHOPIFY_API_SECRET must be set')
+      throw new Error('SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set')
     }
 
     shopifyInstance = shopifyApi({
