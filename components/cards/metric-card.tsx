@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 
 interface MetricCardProps {
   title: string
+  description?: string
   value: string
   subtitle?: string
   trend?: { value: number; label: string }
@@ -24,6 +25,7 @@ const ALERT_BORDER: Record<string, string> = {
 
 export function MetricCard({
   title,
+  description,
   value,
   subtitle,
   trend,
@@ -48,10 +50,17 @@ export function MetricCard({
 
   return (
     <Card className={cn('relative', alert && ALERT_BORDER[alert], className)}>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
+      <CardHeader className="flex flex-row items-start justify-between gap-2">
+        <div className="space-y-0.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            {title}
+          </CardTitle>
+          {description && (
+            <p className="text-[11px] leading-tight text-muted-foreground/60">
+              {description}
+            </p>
+          )}
+        </div>
         {icon && (
           <div className="text-muted-foreground [&_svg]:size-4">{icon}</div>
         )}

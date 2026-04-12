@@ -273,6 +273,7 @@ export default async function CEOOverviewPage() {
       <div className="grid grid-cols-2 gap-4 px-6 pb-4 md:grid-cols-4">
         <MetricCard
           title="Run Rate"
+          description="Latest month revenue × 12"
           value={formatCompact(runRate)}
           subtitle={
             runRateYoY !== null
@@ -287,6 +288,7 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Cash"
+          description="Bank balance from Finaloop"
           value={formatCompact(cash)}
           subtitle={
             daysOfCash !== null ? `${daysOfCash} days of cash` : undefined
@@ -294,6 +296,7 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Revenue MTD"
+          description="Net revenue for the current month"
           value={formatCompact(latestRevenue)}
           subtitle={latest?.is_partial ? 'Partial month' : undefined}
           trend={
@@ -304,6 +307,7 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Gross Margin"
+          description="Revenue minus COGS, as %"
           value={formatPercent(grossMargin)}
           trend={
             marginTrend !== null
@@ -313,6 +317,7 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Blended CAC"
+          description="Ad spend ÷ new customers"
           value={
             blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'
           }
@@ -320,17 +325,20 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="13-Week Min"
+          description="Lowest forecasted cash balance"
           value={forecastMin !== null ? formatCompact(forecastMin) : '\u2014'}
           subtitle={forecastMin === null ? 'Run forecast to populate' : undefined}
           alert={forecastAlert}
         />
         <MetricCard
           title="Committed POs"
+          description="Outstanding purchase orders"
           value={formatCompact(committedPOs)}
           subtitle={posCashPct ? `${posCashPct}% of cash` : undefined}
         />
         <MetricCard
           title="Alerts"
+          description="Thresholds needing attention"
           value={formatCount(alerts.length)}
           alert={alerts.length > 0 ? 'red' : 'green'}
         />
