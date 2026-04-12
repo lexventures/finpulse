@@ -50,6 +50,10 @@ interface PnlRow {
   other_income_expenses: number
   cogs: number
   total_opex: number
+  payroll: number
+  shipping_fulfillment: number
+  ga_expense: number
+  sm_expense: number
   is_partial: boolean
 }
 
@@ -57,13 +61,17 @@ interface BsRow {
   month: string
   cash_and_equivalents: number
   inventory_value: number
+  sales_tax_liability: number
+  accounts_payable: number
+  accounts_receivable: number
 }
 
 interface CfRow {
   month: string
   net_cash_flow: number
-  sales_tax_payments: number
-  ending_cash: number
+  sales_tax_payments: number | null
+  inventory_purchases: number | null
+  ending_cash: number | null
 }
 
 interface ApRow {
@@ -95,17 +103,17 @@ export default async function DashboardPage() {
   const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
-      .select('month, channel, gross_revenue, net_revenue, returns, discounts, selling_fees, processing_fees, shipping_income, other_income_expenses, cogs, total_opex, is_partial')
+      .select('month, channel, gross_revenue, net_revenue, returns, discounts, selling_fees, processing_fees, shipping_income, other_income_expenses, cogs, total_opex, payroll, shipping_fulfillment, ga_expense, sm_expense, is_partial')
       .order('month', { ascending: false })
       .limit(200),
     supabase
       .from('fin_balance_sheet_monthly')
-      .select('month, cash_and_equivalents, inventory_value')
+      .select('month, cash_and_equivalents, inventory_value, sales_tax_liability, accounts_payable, accounts_receivable')
       .order('month', { ascending: false })
       .limit(24),
     supabase
       .from('fin_cashflow_monthly')
-      .select('month, net_cash_flow, sales_tax_payments, ending_cash')
+      .select('month, net_cash_flow, sales_tax_payments, inventory_purchases, ending_cash')
       .order('month', { ascending: false })
       .limit(24),
     supabase
@@ -133,57 +141,87 @@ export default async function DashboardPage() {
   // ---- KPI HEADER CALCULATIONS ----
   const latestBs = bs[0]
   const cashPosition = latestBs?.cash_and_equivalents ?? 0
-  // Use trailing 3 completed months of cash flow (skip index 0 if it might be partial/current)
-  const completedCf = cf.slice(0, 3)
-  const avgNetCashFlow = completedCf.length > 0
-    ? completedCf.reduce((s, r) => s + (r.net_cash_flow ?? 0), 0) / completedCf.length
+
+  const companyPnl = pnl.filter((r) => r.channel === 'company' && !r.is_partial)
+  const latestCompanyPnl = companyPnl[0]
+
+  // Compute monthly burn from P&L: COGS + all opex categories + other expenses
+  // total_opex may be near-zero if section parsing missed items, so compute from raw fields
+  const trailing3Pnl = companyPnl.slice(0, 3)
+
+  function monthlyBurn(r: PnlRow): number {
+    return Math.abs(r.cogs) + Math.abs(r.total_opex) + Math.abs(r.other_income_expenses)
+  }
+
+  const avgMonthlyBurn = trailing3Pnl.length > 0
+    ? trailing3Pnl.reduce((s, r) => s + monthlyBurn(r), 0) / trailing3Pnl.length
     : 0
-  // Burn rate: only meaningful when net cash flow is negative (company is spending more than earning)
-  const weeklyBurnRate = avgNetCashFlow < 0 ? Math.abs(avgNetCashFlow) / WEEKS_PER_MONTH : 0
+  const weeklyBurnRate = avgMonthlyBurn / WEEKS_PER_MONTH
   const runwayWeeks = weeklyBurnRate > 0 ? Math.floor(cashPosition / weeklyBurnRate) : 999
 
   const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
 
-  const companyPnl = pnl.filter((r) => r.channel === 'company' && !r.is_partial)
-  const latestCompanyPnl = companyPnl[0]
   const grossToNetPct = latestCompanyPnl && latestCompanyPnl.gross_revenue > 0
     ? (latestCompanyPnl.net_revenue / latestCompanyPnl.gross_revenue) * 100
     : 0
 
   // ---- 13-WEEK CASH FLOW FORECAST ----
-  const trailing3Pnl = companyPnl.slice(0, 3)
   const avgRevenue = trailing3Pnl.length > 0
     ? trailing3Pnl.reduce((s, r) => s + r.net_revenue, 0) / trailing3Pnl.length
     : 0
-  const avgOpex = trailing3Pnl.length > 0
-    ? trailing3Pnl.reduce((s, r) => s + Math.abs(r.total_opex), 0) / trailing3Pnl.length
-    : 0
+
+  // Use cash flow data if available; derive from balance sheet changes when CF fields are null
   const trailing3Cf = cf.slice(0, 3)
-  const avgTax = trailing3Cf.length > 0
-    ? trailing3Cf.reduce((s, r) => s + Math.abs(r.sales_tax_payments ?? 0), 0) / trailing3Cf.length
+  const cfTaxSum = trailing3Cf.reduce((s, r) => s + Math.abs(r.sales_tax_payments ?? 0), 0)
+
+  // If CF has no tax data, estimate from BS tax liability change (growth = accruing taxes)
+  let avgTax: number
+  if (cfTaxSum > 0) {
+    avgTax = cfTaxSum / trailing3Cf.length
+  } else if (bs.length >= 2) {
+    const taxDeltas: number[] = []
+    for (let i = 0; i < Math.min(3, bs.length - 1); i++) {
+      const delta = Math.abs((bs[i].sales_tax_liability ?? 0) - (bs[i + 1]?.sales_tax_liability ?? 0))
+      taxDeltas.push(delta)
+    }
+    avgTax = taxDeltas.length > 0 ? taxDeltas.reduce((a, b) => a + b, 0) / taxDeltas.length : 0
+  } else {
+    avgTax = 0
+  }
+
+  const cfInvSum = trailing3Cf.reduce((s, r) => s + Math.abs(r.inventory_purchases ?? 0), 0)
+  const avgInventoryPurchases = trailing3Cf.length > 0 ? cfInvSum / trailing3Cf.length : 0
+
+  // Separate burn into components for the forecast chart stacked bars.
+  // COGS is already in monthlyBurn; break out PO payments (from CF) and tax as separate components.
+  // Operating burn = total burn minus COGS (COGS is the inventory/PO component).
+  const avgCogs = trailing3Pnl.length > 0
+    ? trailing3Pnl.reduce((s, r) => s + Math.abs(r.cogs), 0) / trailing3Pnl.length
     : 0
+  const avgOperatingBurn = avgMonthlyBurn - avgCogs
 
   const weeklyInflow = avgRevenue / WEEKS_PER_MONTH
-  const weeklyOpex = avgOpex / WEEKS_PER_MONTH
-  const weeklyPo = (shopifyDaily?.incoming_inventory_value ?? 0) / 13
+  const weeklyOperating = avgOperatingBurn / WEEKS_PER_MONTH
+  const weeklyCogs = avgCogs / WEEKS_PER_MONTH
   const weeklyTax = avgTax / WEEKS_PER_MONTH
+  const weeklyTotalOutflow = weeklyOperating + weeklyCogs + weeklyTax
 
-  const startingCash = cf[0]?.ending_cash ?? cashPosition
+  const startingCash = cashPosition
   const forecastData = Array.from({ length: 13 }, (_, i) => {
     const weekNum = i + 1
     const now = new Date()
     const weekStart = new Date(now.getTime() + i * 7 * 86_400_000)
     const label = `Wk ${weekNum} ${(weekStart.getMonth() + 1)}/${weekStart.getDate()}`
     const cumInflows = weeklyInflow * weekNum
-    const cumOutflows = (weeklyOpex + weeklyPo + weeklyTax) * weekNum
+    const cumOutflows = weeklyTotalOutflow * weekNum
     const projectedBalance = startingCash + cumInflows - cumOutflows
     return {
       label,
       grossInflow: Math.round(weeklyInflow),
-      openingBalance: Math.round(i === 0 ? startingCash : startingCash + weeklyInflow * i - (weeklyOpex + weeklyPo + weeklyTax) * i),
+      openingBalance: Math.round(i === 0 ? startingCash : startingCash + weeklyInflow * i - weeklyTotalOutflow * i),
       cashInflows: Math.round(weeklyInflow),
-      operatingOutflows: Math.round(weeklyOpex),
-      poPayments: Math.round(weeklyPo),
+      operatingOutflows: Math.round(weeklyOperating),
+      poPayments: Math.round(weeklyCogs),
       taxReserves: Math.round(weeklyTax),
       projectedBalance: Math.round(projectedBalance),
     }
@@ -234,7 +272,7 @@ export default async function DashboardPage() {
   const burnMonths = companyPnl.slice(0, 12).reverse()
   const burnData = burnMonths.map((r) => ({
     month: new Date(r.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short' }),
-    amount: Math.abs(r.total_opex) + Math.abs(r.cogs),
+    amount: monthlyBurn(r),
   }))
 
   // ---- RUNWAY PROJECTION ----
@@ -308,7 +346,7 @@ export default async function DashboardPage() {
         {/* Section 1: KPI Header Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <KpiCard label="CASH POSITION" value={fmtFull(cashPosition)} sub="Current bank balance" color="blue" />
-          <KpiCard label="WEEKLY BURN RATE" value={`${fmtFull(weeklyBurnRate)}/wk`} sub={`Avg cash out / week (${WEEKS_PER_MONTH.toFixed(1)} wks)`} color="red" />
+          <KpiCard label="WEEKLY BURN RATE" value={`${fmtFull(weeklyBurnRate)}/wk`} sub="COGS + opex + other (trailing 3 mo avg)" color="red" />
           <KpiCard label="RUNWAY" value={`${runwayWeeks} weeks`} sub={`Weeks until cash = $0`} color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'} />
           <KpiCard label="TOTAL AP OUTSTANDING" value={fmtFull(totalApOutstanding)} sub="Vendor bills + open POs" color="orange" />
           <KpiCard label="GROSS-TO-NET" value={fmtPct(grossToNetPct)} sub="Revenue retention ratio" color="blue" />
@@ -375,7 +413,7 @@ export default async function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Monthly Burn Rate Trend</CardTitle>
-              <CardDescription>Total monthly cash outflows (operating expenses + cost of goods sold).</CardDescription>
+              <CardDescription>Total monthly spend: COGS + operating expenses + other expenses from the P&amp;L.</CardDescription>
             </CardHeader>
             <CardContent>
               {burnData.length > 0 ? (

@@ -107,15 +107,15 @@ const BS_FIELD_MAP: Array<{ test: RegExp; col: string }> = [
 
 // Cash-flow line-item → DB column
 const CF_FIELD_MAP: Array<{ test: RegExp; col: string }> = [
-  { test: /cash (from|provided by) operations|operating activities/i, col: 'cash_from_operations' },
-  { test: /cash (from|used in) investing|investing activities/i, col: 'cash_from_investing' },
-  { test: /cash (from|used in) financing|financing activities/i, col: 'cash_from_financing' },
-  { test: /net (cash flow|change in cash|increase|decrease)/i, col: 'net_cash_flow' },
-  { test: /inventory purchase/i, col: 'inventory_purchases' },
-  { test: /owner.?s? distribution/i, col: 'owner_distributions' },
-  { test: /sales tax payment/i, col: 'sales_tax_payments' },
-  { test: /(starting|beginning|opening) (cash|balance)/i, col: 'starting_cash' },
-  { test: /(ending|closing) (cash|balance)/i, col: 'ending_cash' },
+  { test: /cash (from|provided by|used in) operations|operating activities|net cash.*operating/i, col: 'cash_from_operations' },
+  { test: /cash (from|used in) investing|investing activities|net cash.*investing/i, col: 'cash_from_investing' },
+  { test: /cash (from|used in) financing|financing activities|net cash.*financing/i, col: 'cash_from_financing' },
+  { test: /net (cash flow|change in cash|increase|decrease)|total change|net change in cash/i, col: 'net_cash_flow' },
+  { test: /inventory purchase|purchase.*inventory/i, col: 'inventory_purchases' },
+  { test: /owner.?s? distribution|distribution.*owner/i, col: 'owner_distributions' },
+  { test: /sales tax payment|tax.*payment|remit.*tax/i, col: 'sales_tax_payments' },
+  { test: /(starting|beginning|opening) (cash|balance)|cash.*beginning|balance.*beginning/i, col: 'starting_cash' },
+  { test: /(ending|closing) (cash|balance)|cash.*end\b|balance.*end\b/i, col: 'ending_cash' },
 ]
 
 const MONTH_ABBREVS: Record<string, string> = {
