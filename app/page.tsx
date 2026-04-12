@@ -86,7 +86,7 @@ export default async function CEOOverviewPage() {
       .limit(1),
     supabase
       .from('fin_kpi_monthly')
-      .select('month, channel, net_revenue, allocated_ad_spend, gross_margin_pct')
+      .select('month, channel, net_revenue, allocated_ad_spend, gross_margin_pct, cogs')
       .neq('channel', 'company')
       .order('month', { ascending: false }),
     supabase
@@ -223,8 +223,6 @@ export default async function CEOOverviewPage() {
     ratio: number | null
   }
 
-  const NO_COGS_CHANNELS = new Set(['retail', 'marketplace', 'wholesale_key'])
-
   const BREAKOUT_CHANNELS: Array<{ key: string; label: string }> = [
     { key: 'dtc', label: 'DTC (Shopify)' },
     { key: 'wholesale_faire', label: 'Faire' },
@@ -255,8 +253,9 @@ export default async function CEOOverviewPage() {
     const chAdSpend = Math.abs(Number(kpi?.allocated_ad_spend) || 0)
     const chRevenue = Number(kpi?.net_revenue) || 0
     const rawMargin = Number(kpi?.gross_margin_pct) || 0
+    const chCogs = Number(kpi?.cogs) || 0
 
-    const needsProxy = NO_COGS_CHANNELS.has(key) && rawMargin === 0 && chRevenue > 0
+    const needsProxy = chCogs === 0 && chRevenue > 0
     const chMargin = needsProxy ? companyMargin : rawMargin
 
     let chOrders = 0
