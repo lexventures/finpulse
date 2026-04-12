@@ -69,7 +69,9 @@ export default async function CashPage() {
 
   // --- Metric Cards ---
 
-  const cash = balance ? Number(balance.cash_and_equivalents) || null : null
+  const cash =
+    (balance ? Number(balance.cash_and_equivalents) || null : null) ??
+    (cashflows.length > 0 ? Number(cashflows[0].ending_cash) || null : null)
 
   const avgMonthlyOpex =
     pnlRecent.length > 0
