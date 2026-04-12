@@ -345,6 +345,21 @@ async function fetchSheets(
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!res.ok) {
+    // If tab name not found, retry with Sheet1
+    if (res.status === 400 && sheetNames.length === 1 && sheetNames[0] !== 'Sheet1') {
+      const fallbackUrl = new URL(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet`,
+      )
+      fallbackUrl.searchParams.append('ranges', 'Sheet1')
+      fallbackUrl.searchParams.set('valueRenderOption', 'UNFORMATTED_VALUE')
+      const fallbackRes = await fetch(fallbackUrl.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (fallbackRes.ok) {
+        const body = await fallbackRes.json()
+        return (body.valueRanges ?? []) as SheetValues[]
+      }
+    }
     const text = await res.text()
     throw new Error(`Sheets API error (${res.status}): ${text}`)
   }
@@ -671,9 +686,14 @@ Deno.serve(async (req) => {
     })
   }
 
-  const pnlTab = Deno.env.get('FINALOOP_PNL_TAB') ?? 'Profit & Loss'
-  const bsTab = Deno.env.get('FINALOOP_BS_TAB') ?? 'Balance Sheet'
-  const cfTab = Deno.env.get('FINALOOP_CF_TAB') ?? 'Cash Flow'
+  // Tab names — try settings, env vars, then common Finaloop defaults
+  const pnlTabSetting = url.searchParams.get('pnl_tab') ?? Deno.env.get('FINALOOP_PNL_TAB') ?? ''
+  const bsTabSetting = url.searchParams.get('bs_tab') ?? Deno.env.get('FINALOOP_BS_TAB') ?? ''
+  const cfTabSetting = url.searchParams.get('cf_tab') ?? Deno.env.get('FINALOOP_CF_TAB') ?? ''
+
+  const pnlTab = pnlTabSetting || 'Profit and Loss'
+  const bsTab = bsTabSetting || 'Balance Sheet'
+  const cfTab = cfTabSetting || 'Cash Flow Statement'
 
   // Determine if all three are in the same spreadsheet or separate
   const allSameSheet = pnlSheetId === bsSheetId && bsSheetId === cfSheetId
