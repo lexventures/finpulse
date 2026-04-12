@@ -58,7 +58,7 @@ interface ShopifyQLResult {
   shopifyqlQuery: {
     tableData?: {
       columns: Array<{ name: string; dataType: string }>
-      rows: string[][]
+      rows: Array<Record<string, string>>
     }
     parseErrors?: string[]
   }
@@ -155,17 +155,15 @@ Deno.serve(async (req) => {
       let wholesaleRows = 0
       const salesData = salesResult.shopifyqlQuery.tableData
       if (salesData?.rows?.length) {
-        const cols = Object.fromEntries(salesData.columns.map((c, i) => [c.name, i]))
-
         const upsertData = salesData.rows
-          .filter((row) => row[cols['day']])
+          .filter((row) => row.day)
           .map((row) => ({
-            date: row[cols['day']],
+            date: row.day,
             segment: 'wholesale_direct' as const,
-            gross_revenue: round(parseFloat(row[cols['gross_sales']] ?? '0')),
-            net_revenue: round(parseFloat(row[cols['net_sales']] ?? '0')),
-            order_count: parseInt(row[cols['orders']] ?? '0', 10),
-            avg_order_value: round(parseFloat(row[cols['average_order_value']] ?? '0')),
+            gross_revenue: round(parseFloat(row.gross_sales ?? '0')),
+            net_revenue: round(parseFloat(row.net_sales ?? '0')),
+            order_count: parseInt(row.orders ?? '0', 10),
+            avg_order_value: round(parseFloat(row.average_order_value ?? '0')),
             synced_at: new Date().toISOString(),
           }))
 
@@ -180,7 +178,7 @@ Deno.serve(async (req) => {
       }
 
       // 2. Sessions/conversion for the wholesale storefront
-      const analyticsQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, total_sales, discounts, sales_reversals, shipping, taxes, orders, sessions, conversion_rate, cart_abandonment_rate TIMESERIES day SINCE -${days}d UNTIL today`
+      const analyticsQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, orders, sessions, conversion_rate TIMESERIES day SINCE -${days}d UNTIL today`
 
       const analyticsResult = await shopifyGraphQL<ShopifyQLResult>(
         shop, accessToken, SHOPIFYQL_QUERY, { query: analyticsQL },
@@ -190,23 +188,22 @@ Deno.serve(async (req) => {
       if (!analyticsResult.shopifyqlQuery.parseErrors?.length) {
         const aData = analyticsResult.shopifyqlQuery.tableData
         if (aData?.rows?.length) {
-          const aCols = Object.fromEntries(aData.columns.map((c, i) => [c.name, i]))
           const upsertAnalytics = aData.rows
-            .filter((row) => row[aCols['day']])
+            .filter((row) => row.day)
             .map((row) => ({
-              date: row[aCols['day']],
+              date: row.day,
               store: 'elsw',
-              net_sales: round(parseFloat(row[aCols['net_sales']] ?? '0')),
-              gross_sales: round(parseFloat(row[aCols['gross_sales']] ?? '0')),
-              total_sales: round(parseFloat(row[aCols['total_sales']] ?? '0')),
-              discounts: round(parseFloat(row[aCols['discounts']] ?? '0')),
-              returns: round(parseFloat(row[aCols['sales_reversals']] ?? row[aCols['returns']] ?? '0')),
-              shipping: round(parseFloat(row[aCols['shipping']] ?? '0')),
-              taxes: round(parseFloat(row[aCols['taxes']] ?? '0')),
-              orders: parseInt(row[aCols['orders']] ?? '0', 10),
-              sessions: parseInt(row[aCols['sessions']] ?? '0', 10),
-              conversion_rate: round(parseFloat(row[aCols['conversion_rate']] ?? '0'), 4),
-              cart_abandonment_rate: round(parseFloat(row[aCols['cart_abandonment_rate']] ?? '0'), 4),
+              net_sales: round(parseFloat(row.net_sales ?? '0')),
+              gross_sales: round(parseFloat(row.gross_sales ?? '0')),
+              total_sales: round(parseFloat(row.net_sales ?? '0')),
+              discounts: 0,
+              returns: 0,
+              shipping: 0,
+              taxes: 0,
+              orders: parseInt(row.orders ?? '0', 10),
+              sessions: parseInt(row.sessions ?? '0', 10),
+              conversion_rate: round(parseFloat(row.conversion_rate ?? '0'), 4),
+              cart_abandonment_rate: 0,
               synced_at: new Date().toISOString(),
             }))
 

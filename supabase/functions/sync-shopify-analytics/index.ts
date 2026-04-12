@@ -58,47 +58,10 @@ interface ShopifyQLResult {
   shopifyqlQuery: {
     tableData?: {
       columns: Array<{ name: string; dataType: string }>
-      rows: string[][]
+      rows: Array<Record<string, string>>
     }
     parseErrors?: string[]
   }
-}
-
-interface DayRow {
-  date: string
-  net_sales: number
-  gross_sales: number
-  total_sales: number
-  discounts: number
-  returns: number
-  shipping: number
-  taxes: number
-  orders: number
-  sessions: number
-  conversion_rate: number
-  cart_abandonment_rate: number
-}
-
-function parseShopifyQLRows(
-  columns: Array<{ name: string }>,
-  rows: string[][],
-): DayRow[] {
-  const colIndex = Object.fromEntries(columns.map((c, i) => [c.name, i]))
-
-  return rows.map((row) => ({
-    date: row[colIndex['day']] || row[colIndex['date']] || '',
-    net_sales: parseFloat(row[colIndex['net_sales']] ?? '0'),
-    gross_sales: parseFloat(row[colIndex['gross_sales']] ?? '0'),
-    total_sales: parseFloat(row[colIndex['total_sales']] ?? '0'),
-    discounts: parseFloat(row[colIndex['discounts']] ?? '0'),
-    returns: parseFloat(row[colIndex['sales_reversals']] ?? row[colIndex['returns']] ?? '0'),
-    shipping: parseFloat(row[colIndex['shipping']] ?? '0'),
-    taxes: parseFloat(row[colIndex['taxes']] ?? '0'),
-    orders: parseInt(row[colIndex['orders']] ?? '0', 10),
-    sessions: parseInt(row[colIndex['sessions']] ?? '0', 10),
-    conversion_rate: parseFloat(row[colIndex['conversion_rate']] ?? '0'),
-    cart_abandonment_rate: parseFloat(row[colIndex['cart_abandonment_rate']] ?? '0'),
-  }))
 }
 
 const CORS_HEADERS = {
@@ -170,7 +133,7 @@ Deno.serve(async (req) => {
         await sleep(RETRY_DELAYS[attempt - 2])
       }
 
-      const salesQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, total_sales, discounts, sales_reversals, shipping, taxes, orders, sessions, conversion_rate, cart_abandonment_rate TIMESERIES day SINCE -${days}d UNTIL today`
+      const salesQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, orders, sessions, conversion_rate TIMESERIES day SINCE -${days}d UNTIL today`
 
       const result = await shopifyGraphQL<ShopifyQLResult>(
         shop, accessToken, SHOPIFYQL_QUERY, { query: salesQL },
@@ -190,24 +153,22 @@ Deno.serve(async (req) => {
         })
       }
 
-      const dayRows = parseShopifyQLRows(tableData.columns, tableData.rows)
-
-      const upsertData = dayRows
-        .filter((r) => r.date)
-        .map((r) => ({
-          date: r.date,
+      const upsertData = tableData.rows
+        .filter((row) => row.day)
+        .map((row) => ({
+          date: row.day,
           store: 'emilylex',
-          net_sales: round(r.net_sales),
-          gross_sales: round(r.gross_sales),
-          total_sales: round(r.total_sales),
-          discounts: round(r.discounts),
-          returns: round(r.returns),
-          shipping: round(r.shipping),
-          taxes: round(r.taxes),
-          orders: r.orders,
-          sessions: r.sessions,
-          conversion_rate: round(r.conversion_rate, 4),
-          cart_abandonment_rate: round(r.cart_abandonment_rate, 4),
+          net_sales: round(parseFloat(row.net_sales ?? '0')),
+          gross_sales: round(parseFloat(row.gross_sales ?? '0')),
+          total_sales: round(parseFloat(row.net_sales ?? '0')),
+          discounts: 0,
+          returns: 0,
+          shipping: 0,
+          taxes: 0,
+          orders: parseInt(row.orders ?? '0', 10),
+          sessions: parseInt(row.sessions ?? '0', 10),
+          conversion_rate: round(parseFloat(row.conversion_rate ?? '0'), 4),
+          cart_abandonment_rate: 0,
           synced_at: new Date().toISOString(),
         }))
 
