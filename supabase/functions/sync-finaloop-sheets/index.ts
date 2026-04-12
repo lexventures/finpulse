@@ -693,7 +693,7 @@ Deno.serve(async (req) => {
 
   const pnlTab = pnlTabSetting || 'Profit and Loss'
   const bsTab = bsTabSetting || 'Balance Sheet'
-  const cfTab = cfTabSetting || 'Cash Flow Statement'
+  const cfTab = cfTabSetting || 'Cash Flow'
 
   // Determine if all three are in the same spreadsheet or separate
   const allSameSheet = pnlSheetId === bsSheetId && bsSheetId === cfSheetId
