@@ -124,10 +124,12 @@ export default async function CEOOverviewPage() {
       ? (((latestRevenue! - priorRevenue) / priorRevenue) * 100)
       : null
 
-  // Cash — prefer balance sheet, fall back to cashflow ending_cash
+  // Cash — prefer balance sheet -> cashflow ending -> forecast starting week 1
+  const forecastStartCash = forecasts.length > 0 ? Number(forecasts[0].starting_cash) || null : null
   const cash =
     (balance ? Number(balance.cash_and_equivalents) || null : null) ??
-    (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null)
+    (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null) ??
+    forecastStartCash
   const recentOpex = pnl.slice(0, 3)
   const avgOpex =
     recentOpex.length > 0

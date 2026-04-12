@@ -68,10 +68,12 @@ export default async function CashPage() {
   const lastSync = syncResult.data?.[0]
 
   // --- Metric Cards ---
+  // Cash sources in priority order: balance sheet -> cashflow ending -> forecast starting week 1
 
   const cash =
     (balance ? Number(balance.cash_and_equivalents) || null : null) ??
-    (cashflows.length > 0 ? Number(cashflows[0].ending_cash) || null : null)
+    (cashflows.length > 0 ? Number(cashflows[0].ending_cash) || null : null) ??
+    (forecasts.length > 0 ? Number(forecasts[0].starting_cash) || null : null)
 
   const avgMonthlyOpex =
     pnlRecent.length > 0
