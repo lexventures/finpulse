@@ -81,6 +81,22 @@ function todayEastern(): { date: string; nextDate: string } {
   return { date: fmt(now), nextDate: fmt(tomorrow) }
 }
 
+function easternOffset(): string {
+  const now = new Date()
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  })
+  const parts = fmt.formatToParts(now)
+  const tz = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT-5'
+  const match = tz.match(/GMT([+-]\d+)/)
+  if (match) {
+    const hours = parseInt(match[1], 10)
+    return `${hours >= 0 ? '+' : '-'}${String(Math.abs(hours)).padStart(2, '0')}:00`
+  }
+  return '-05:00'
+}
+
 // ---------------------------------------------------------------------------
 // Shopify GraphQL client
 // ---------------------------------------------------------------------------
@@ -348,7 +364,8 @@ Deno.serve(async (req) => {
     nextDate = today.nextDate
   }
 
-  const dateFilter = `created_at:>='${targetDate}T00:00:00-05:00' created_at:<'${nextDate}T00:00:00-05:00'`
+  const off = easternOffset()
+  const dateFilter = `created_at:>='${targetDate}T00:00:00${off}' created_at:<'${nextDate}T00:00:00${off}'`
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {

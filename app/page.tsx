@@ -12,6 +12,7 @@ import {
   formatCurrency,
   formatCount,
 } from '@/lib/utils/format'
+import { calcBlendedCac } from '@/lib/calculations/cac'
 import { AlertFeedWrapper } from './alert-feed-wrapper'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -50,6 +51,7 @@ export default async function CEOOverviewPage() {
     syncResult,
     channelPnlResult,
     shopifyResult,
+    revenueDailyResult,
   ] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
@@ -88,6 +90,11 @@ export default async function CEOOverviewPage() {
       .select('*')
       .order('date', { ascending: false })
       .limit(1),
+    supabase
+      .from('fin_revenue_daily')
+      .select('date, new_customer_orders')
+      .eq('channel', 'dtc')
+      .gte('date', `${new Date().getFullYear() - 2}-01-01`),
   ])
 
   const pnl = pnlResult.data ?? []
@@ -97,6 +104,7 @@ export default async function CEOOverviewPage() {
   const lastSync = syncResult.data?.[0]
   const channelPnl = channelPnlResult.data ?? []
   const shopifyDaily = shopifyResult.data?.[0]
+  const revenueDaily = revenueDailyResult.data ?? []
 
   const latest = pnl[0]
   const priorYear = pnl.length >= 13 ? pnl[12] : null
@@ -113,13 +121,16 @@ export default async function CEOOverviewPage() {
   // Cash
   const cash = balance ? Number(balance.cash_and_equivalents) || null : null
   const recentOpex = pnl.slice(0, 3)
-  const avgMonthlyBurn =
+  const avgOpex =
     recentOpex.length > 0
       ? recentOpex.reduce((s, m) => s + (Number(m.total_opex) || 0), 0) /
         recentOpex.length
       : null
+  const avgMonthlyBurn = avgOpex !== null ? Math.abs(avgOpex) : null
   const daysOfCash =
-    cash && avgMonthlyBurn && avgMonthlyBurn > 0
+    cash != null &&
+    avgMonthlyBurn != null &&
+    avgMonthlyBurn > 0
       ? Math.round(cash / (avgMonthlyBurn / 30))
       : null
 
@@ -141,8 +152,15 @@ export default async function CEOOverviewPage() {
       ? Number((grossMargin - threeMonthAvg).toFixed(1))
       : null
 
-  // Blended CAC (ad spend from Finaloop / new customers from Shopify)
+  // Blended CAC (ad spend from Finaloop / new customers from Shopify daily)
   const adSpend = latest ? Number(latest.allocated_ad_spend) || 0 : 0
+  const latestMonthKey = latest ? String(latest.month).slice(0, 7) : null
+  const newCustomersInLatestMonth = latestMonthKey
+    ? revenueDaily
+        .filter((d) => String(d.date).slice(0, 7) === latestMonthKey)
+        .reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
+    : 0
+  const blendedCac = calcBlendedCac(Math.abs(adSpend), newCustomersInLatestMonth)
 
   // 13-Week Forecast Minimum
   const forecastCashValues = forecasts
@@ -250,7 +268,9 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Blended CAC"
-          value={adSpend > 0 ? formatCurrency(adSpend) : '\u2014'}
+          value={
+            blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'
+          }
           subtitle="LTV:CAC available Phase 3"
         />
         <MetricCard

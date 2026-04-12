@@ -17,6 +17,9 @@ import {
   formatCurrency,
   formatCount,
 } from '@/lib/utils/format'
+import { calcBlendedCac } from '@/lib/calculations/cac'
+import { calcSimplifiedLtv, calcLtvCacRatio, calcPaybackPeriod } from '@/lib/calculations/ltv'
+import { calcMer } from '@/lib/calculations/mer'
 
 const VALID_RANGES = new Set(['7d', '30d', '90d', 'ytd', '12m', 'all'])
 
@@ -153,6 +156,86 @@ export default async function DTCPage(props: {
     date: formatDateLabel(d.date as string),
     member: Number(d.member_avg_order_value) || 0,
     nonMember: Number(d.non_member_avg_order_value) || 0,
+  }))
+
+  // --- Acquisition & Unit Economics ---
+  const now = new Date()
+  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const lastFullMonthDate = new Date(now.getFullYear(), now.getMonth(), 0)
+  const lastFullMonthStr = `${lastFullMonthDate.getFullYear()}-${String(lastFullMonthDate.getMonth() + 1).padStart(2, '0')}`
+
+  const lastFullMonthPnl = pnlData.filter(
+    (d) => (d.month as string).startsWith(lastFullMonthStr)
+  )
+  const currentMonthPnl = pnlData.filter(
+    (d) => (d.month as string).startsWith(currentMonthStr)
+  )
+
+  const lastFullMonthAdSpend = lastFullMonthPnl.reduce(
+    (s, d) => s + (Number(d.allocated_ad_spend) || 0), 0
+  )
+  const lastFullMonthNewCusts = dailyData
+    .filter((d) => (d.date as string).startsWith(lastFullMonthStr))
+    .reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
+
+  const blendedCac = calcBlendedCac(
+    Math.abs(lastFullMonthAdSpend),
+    lastFullMonthNewCusts
+  )
+
+  const currentMonthRevenue = currentMonthPnl.reduce(
+    (s, d) => s + (Number(d.net_revenue) || 0), 0
+  )
+  const currentMonthAdSpend = currentMonthPnl.reduce(
+    (s, d) => s + (Number(d.allocated_ad_spend) || 0), 0
+  )
+  const mer = calcMer(currentMonthRevenue, Math.abs(currentMonthAdSpend))
+
+  const latestGrossMargin = pnlData.at(-1)
+    ? Number(pnlData.at(-1)!.gross_margin_pct) || 50
+    : 50
+
+  function ltvForHorizon(months: number) {
+    const sorted = [...pnlData].sort((a, b) =>
+      (a.month as string).localeCompare(b.month as string)
+    )
+    const horizon = sorted.slice(-months)
+    const rev = horizon.reduce((s, d) => s + (Number(d.net_revenue) || 0), 0)
+    const daysInHorizon = dailyData.filter((d) => {
+      const m = (d.date as string).slice(0, 7)
+      return horizon.some((h) => (h.month as string).startsWith(m))
+    })
+    const newCusts = daysInHorizon.reduce(
+      (s, d) => s + (Number(d.new_customer_orders) || 0), 0
+    )
+    return calcSimplifiedLtv(rev, newCusts, latestGrossMargin)
+  }
+
+  const ltv12 = ltvForHorizon(12)
+  const ltv6 = ltvForHorizon(6)
+  const ltv3 = ltvForHorizon(3)
+
+  const ltvCacRatio = calcLtvCacRatio(ltv12, blendedCac)
+
+  const totalDailyRev = dailyData.reduce(
+    (s, d) => s + (Number(d.net_revenue) || 0), 0
+  )
+  const totalNewCusts = dailyData.reduce(
+    (s, d) => s + (Number(d.new_customer_orders) || 0), 0
+  )
+  const avgDailyRevPerCust =
+    dailyData.length > 0 && totalNewCusts > 0
+      ? totalDailyRev / dailyData.length / totalNewCusts
+      : 0
+  const paybackPeriod = calcPaybackPeriod(
+    blendedCac,
+    avgDailyRevPerCust,
+    latestGrossMargin
+  )
+
+  const adSpendChartData = pnlData.map((d) => ({
+    month: formatMonthLabel(d.month as string),
+    adSpend: Math.abs(Number(d.allocated_ad_spend) || 0),
   }))
 
   // Funnel & conversion metrics
@@ -373,11 +456,110 @@ export default async function DTCPage(props: {
       </section>
 
       <section className="space-y-4 px-6 pb-6">
-        <h2 className="text-lg font-semibold">Acquisition</h2>
+        <h2 className="text-lg font-semibold">Acquisition &amp; Unit Economics</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            title="Blended CAC"
+            value={blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'}
+            subtitle={lastFullMonthNewCusts > 0
+              ? `${formatCount(lastFullMonthNewCusts)} new customers`
+              : 'No new customer data'}
+            alert={blendedCac !== null
+              ? blendedCac > 60 ? 'red' : blendedCac > 40 ? 'yellow' : 'green'
+              : undefined}
+          />
+          <MetricCard
+            title="MER"
+            value={mer !== null ? `${mer.toFixed(1)}x` : '\u2014'}
+            subtitle="Revenue / Ad Spend"
+            alert={mer !== null
+              ? mer < 3 ? 'red' : mer < 5 ? 'yellow' : 'green'
+              : undefined}
+          />
+          <MetricCard
+            title="LTV:CAC Ratio"
+            value={ltvCacRatio !== null ? `${ltvCacRatio.toFixed(1)}x` : '\u2014'}
+            subtitle="12-month LTV basis"
+            alert={ltvCacRatio !== null
+              ? ltvCacRatio < 3 ? 'red' : ltvCacRatio < 5 ? 'yellow' : 'green'
+              : undefined}
+          />
+          <MetricCard
+            title="Payback Period"
+            value={paybackPeriod !== null ? `${Math.round(paybackPeriod)}d` : '\u2014'}
+            subtitle="Days to recover CAC"
+            alert={paybackPeriod !== null
+              ? paybackPeriod > 120 ? 'red' : paybackPeriod > 60 ? 'yellow' : 'green'
+              : undefined}
+          />
+        </div>
+
         <Card>
+          <CardHeader>
+            <CardTitle>LTV by Horizon</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-end gap-8">
+              {([
+                { label: '12 mo', value: ltv12 },
+                { label: '6 mo', value: ltv6 },
+                { label: '3 mo', value: ltv3 },
+              ] as const).map((h) => (
+                <div key={h.label} className="flex flex-col items-center gap-1">
+                  <span className="text-xs text-muted-foreground">{h.label}</span>
+                  <span className="text-xl font-bold">
+                    {h.value !== null ? formatCurrency(h.value) : '\u2014'}
+                  </span>
+                </div>
+              ))}
+              {ltv3 !== null && ltv12 !== null && ltv12 !== 0 && (
+                <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                  <span>3mo vs 12mo:</span>
+                  <span className={ltv3 >= ltv12 ? 'text-emerald-600' : 'text-red-600'}>
+                    {ltv3 >= ltv12 ? '\u2191' : '\u2193'}{' '}
+                    {formatPercent(Math.abs((ltv3 / ltv12 - 1) * 100))}
+                  </span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Ad Spend Trend (Monthly)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FinBarChart
+              data={adSpendChartData}
+              xKey="month"
+              yKeys={[
+                {
+                  key: 'adSpend',
+                  label: 'Ad Spend',
+                  color: 'hsl(var(--chart-5))',
+                },
+              ]}
+              empty={noPnl}
+            />
+          </CardContent>
+        </Card>
+
+        <MetricCard
+          title="Email Revenue % of DTC"
+          value="\u2014"
+          subtitle="Email revenue tracking \u2014 coming soon"
+          className="border-dashed"
+        />
+      </section>
+
+      <section className="space-y-4 px-6 pb-6">
+        <h2 className="text-lg font-semibold">Email/SMS (Retention)</h2>
+        <Card className="border-dashed">
           <CardContent className="flex items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">
-              CAC, LTV, and MER metrics coming in Phase 3
+              Email revenue attribution via Shopify Analytics referring_channel coming in next
+              update. For campaign performance, see Klaviyo.
             </p>
           </CardContent>
         </Card>
