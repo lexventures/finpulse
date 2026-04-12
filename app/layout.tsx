@@ -1,8 +1,6 @@
 import '@/app/globals.css'
 import { Inter } from 'next/font/google'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { SidebarProvider } from '@/components/ui/sidebar'
-import { AppSidebar } from '@/components/layout/app-sidebar'
 import { ShopifyAuthProvider } from '@/components/shopify-auth-provider'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
@@ -19,12 +17,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-background text-foreground antialiased">
         <ShopifyAuthProvider>
           <TooltipProvider>
-            <SidebarProvider>
-              <AppSidebar />
-              <main className="flex-1 overflow-auto">
-                {children}
-              </main>
-            </SidebarProvider>
+            <main className="min-h-screen">
+              {children}
+            </main>
           </TooltipProvider>
         </ShopifyAuthProvider>
       </body>

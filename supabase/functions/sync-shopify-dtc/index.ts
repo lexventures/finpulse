@@ -19,7 +19,9 @@ interface OrderEdge {
 }
 
 interface InventoryItemNode {
+  createdAt: string
   unitCost: { amount: string } | null
+  variant: { product: { vendor: string } } | null
   inventoryLevels: {
     edges: Array<{
       node: {
@@ -182,7 +184,9 @@ const INVENTORY_QUERY = `
     inventoryItems(first: 250, after: $cursor) {
       edges {
         node {
+          createdAt
           unitCost { amount }
+          variant { product { vendor } }
           inventoryLevels(first: 5) {
             edges {
               node {
@@ -203,6 +207,7 @@ const INVENTORY_QUERY = `
 interface InventoryResult {
   incoming_inventory_value: number
   incoming_inventory_sku_count: number
+  ap_items: Array<{ vendor: string; created_at: string; amount: number }>
 }
 
 async function fetchIncomingInventory(
@@ -211,6 +216,7 @@ async function fetchIncomingInventory(
 ): Promise<InventoryResult> {
   let totalValue = 0
   let skuCount = 0
+  const apItems: Array<{ vendor: string; created_at: string; amount: number }> = []
   let cursor: string | null = null
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -234,6 +240,11 @@ async function fetchIncomingInventory(
       if (incomingQty > 0) {
         totalValue += unitCost * incomingQty
         skuCount++
+        apItems.push({
+          vendor: item.variant?.product?.vendor || 'Unknown',
+          created_at: item.createdAt.slice(0, 10),
+          amount: round2(unitCost * incomingQty),
+        })
       }
     }
     if (!data.inventoryItems.pageInfo.hasNextPage) break
@@ -242,6 +253,7 @@ async function fetchIncomingInventory(
   return {
     incoming_inventory_value: round2(totalValue),
     incoming_inventory_sku_count: skuCount,
+    ap_items: apItems,
   }
 }
 
@@ -445,8 +457,25 @@ Deno.serve(async (req) => {
         )
       if (invError) throw new Error(`fin_shopify_daily upsert failed: ${invError.message}`)
 
-      // 5. Log success
-      const totalRows = 3
+      // 5. Sync AP aging from incoming inventory
+      await supabase.from('fin_ap_aging').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (inventory.ap_items.length > 0) {
+        const apRows = inventory.ap_items.map((item) => ({
+          vendor: item.vendor,
+          po_reference: null,
+          item_type: 'Vendor Bill',
+          created_at: item.created_at,
+          amount: item.amount,
+        }))
+        for (let i = 0; i < apRows.length; i += 500) {
+          const chunk = apRows.slice(i, i + 500)
+          const { error: apError } = await supabase.from('fin_ap_aging').insert(chunk)
+          if (apError) throw new Error(`fin_ap_aging insert failed: ${apError.message}`)
+        }
+      }
+
+      // 6. Log success
+      const totalRows = 3 + inventory.ap_items.length
       await supabase.from('fin_sync_log').update({
         status: 'success',
         completed_at: new Date().toISOString(),

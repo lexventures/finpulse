@@ -1,921 +1,556 @@
 export const dynamic = 'force-dynamic'
 
+import Link from 'next/link'
+import { Settings } from 'lucide-react'
 import { createServiceClient } from '@/lib/supabase/server'
-import { PageHeader } from '@/components/layout/page-header'
-import { MetricCard } from '@/components/cards/metric-card'
-import { RevenueBarChart } from '@/components/charts/revenue-bar-chart'
-import { ChannelMixChart } from '@/components/charts/channel-mix-chart'
-import { CashRunwayChart } from '@/components/charts/cash-runway-chart'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  formatCompact,
-  formatPercent,
-  formatCurrency,
-  formatCount,
-} from '@/lib/utils/format'
-import { calcBlendedCac } from '@/lib/calculations/cac'
-import {
-  calcSimplifiedLtv,
-  calcFrequencyLtv,
-  calcLtvCacRatio,
-} from '@/lib/calculations/ltv'
-import { AlertFeedWrapper } from './alert-feed-wrapper'
-import { BriefingCard } from './briefing-card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { ForecastComboChart } from '@/components/charts/forecast-combo-chart'
+import { WaterfallChart } from '@/components/charts/waterfall-chart'
+import { GroupedBarChart } from '@/components/charts/grouped-bar-chart'
+import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
+import { HorizontalBarChart } from '@/components/charts/horizontal-bar-chart'
+import { BurnRateChart } from '@/components/charts/burn-rate-chart'
+import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
 
-const CHANNEL_LABELS: Record<string, string> = {
-  dtc: 'DTC',
-  wholesale: 'Wholesale',
-  wholesale_faire: 'Faire',
-  wholesale_direct: 'Direct',
-  wholesale_key: 'Key Accounts',
-  retail: 'Retail',
-  marketplace: 'Marketplace',
+const WEEKS_PER_MONTH = 4.33
+
+function fmt(n: number | null | undefined): string {
+  if (n == null) return '$0'
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return (n < 0 ? '-' : '') + '$' + (abs / 1_000_000).toFixed(1) + 'M'
+  if (abs >= 1_000) return (n < 0 ? '-' : '') + '$' + Math.round(abs / 1_000).toLocaleString() + 'k' 
+  return '$' + Math.round(n).toLocaleString()
 }
 
-const CHANNEL_COLORS: Record<string, string> = {
-  dtc: 'hsl(var(--chart-1))',
-  wholesale: 'hsl(var(--chart-2))',
-  wholesale_faire: 'hsl(var(--chart-2))',
-  wholesale_direct: 'hsl(var(--chart-3))',
-  wholesale_key: 'hsl(var(--chart-4))',
-  retail: 'hsl(var(--chart-5))',
-  marketplace: 'hsl(210 70% 55%)',
+function fmtFull(n: number | null | undefined): string {
+  if (n == null) return '$0'
+  return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function formatMonthLabel(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00')
-  return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+function fmtPct(n: number | null | undefined): string {
+  if (n == null) return '0%'
+  return n.toFixed(1) + '%'
 }
 
-export default async function CEOOverviewPage() {
+function daysBetween(a: string, b: Date): number {
+  const d = new Date(a)
+  return Math.max(0, Math.floor((b.getTime() - d.getTime()) / 86_400_000))
+}
+
+function ageBucket(days: number): string {
+  if (days <= 30) return '0-30 days'
+  if (days <= 60) return '31-60 days'
+  if (days <= 90) return '61-90 days'
+  return '90+ days'
+}
+
+interface PnlRow {
+  month: string
+  channel: string
+  gross_revenue: number
+  net_revenue: number
+  returns: number
+  discounts: number
+  selling_fees: number
+  processing_fees: number
+  shipping_income: number
+  other_income_expenses: number
+  cogs: number
+  total_opex: number
+  is_partial: boolean
+}
+
+interface BsRow {
+  month: string
+  cash_and_equivalents: number
+  inventory_value: number
+}
+
+interface CfRow {
+  month: string
+  net_cash_flow: number
+  sales_tax_payments: number
+  ending_cash: number
+}
+
+interface ApRow {
+  id: string
+  vendor: string
+  po_reference: string | null
+  item_type: string
+  created_at: string
+  amount: number
+}
+
+interface ArRow {
+  id: string
+  customer_name: string
+  channel: string | null
+  terms: string
+  order_id: string
+  order_date: string
+  amount: number
+}
+
+interface ShopifyDaily {
+  incoming_inventory_value: number
+}
+
+export default async function DashboardPage() {
   const supabase = createServiceClient()
 
-  const [
-    pnlResult,
-    forecastResult,
-    alertsResult,
-    alertHistoryResult,
-    balanceResult,
-    syncResult,
-    channelPnlResult,
-    shopifyResult,
-    revenueDailyResult,
-    briefingResult,
-    wholesaleDailyResult,
-    cashflowResult,
-  ] = await Promise.all([
+  const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes] = await Promise.all([
     supabase
-      .from('fin_kpi_monthly')
-      .select('month, net_revenue, total_opex, gross_margin_pct, allocated_ad_spend, is_partial')
-      .eq('channel', 'company')
+      .from('fin_pnl_monthly')
+      .select('month, channel, gross_revenue, net_revenue, returns, discounts, selling_fees, processing_fees, shipping_income, other_income_expenses, cogs, total_opex, is_partial')
+      .order('month', { ascending: false })
+      .limit(200),
+    supabase
+      .from('fin_balance_sheet_monthly')
+      .select('month, cash_and_equivalents, inventory_value')
       .order('month', { ascending: false })
       .limit(24),
     supabase
-      .from('fin_cash_forecast')
-      .select('*')
-      .order('forecast_run_date', { ascending: false })
-      .limit(13),
-    supabase
-      .from('fin_alerts')
-      .select('*')
-      .eq('acknowledged', false)
-      .order('triggered_at', { ascending: false })
-      .limit(10),
-    supabase
-      .from('fin_alerts')
-      .select('severity, triggered_at')
-      .gte('triggered_at', new Date(Date.now() - 30 * 86400000).toISOString())
-      .order('triggered_at', { ascending: true }),
-    supabase
-      .from('fin_balance_sheet_monthly')
-      .select('*')
+      .from('fin_cashflow_monthly')
+      .select('month, net_cash_flow, sales_tax_payments, ending_cash')
       .order('month', { ascending: false })
-      .limit(1),
+      .limit(24),
     supabase
-      .from('fin_sync_log')
+      .from('fin_ap_aging')
       .select('*')
-      .order('started_at', { ascending: false })
-      .limit(1),
+      .order('amount', { ascending: true }),
     supabase
-      .from('fin_kpi_monthly')
-      .select(
-        'month, channel, net_revenue, allocated_ad_spend, gross_margin_pct, cogs, contribution_margin, is_partial',
-      )
-      .neq('channel', 'company')
-      .order('month', { ascending: false }),
+      .from('fin_ar_aging')
+      .select('*')
+      .order('amount', { ascending: true }),
     supabase
       .from('fin_shopify_daily')
-      .select('*')
+      .select('incoming_inventory_value')
       .order('date', { ascending: false })
       .limit(1),
-    supabase
-      .from('fin_revenue_daily')
-      .select('date, order_count, new_customer_orders')
-      .eq('channel', 'dtc')
-      .gte('date', `${new Date().getFullYear() - 2}-01-01`),
-    supabase
-      .from('fin_settings')
-      .select('value')
-      .eq('key', 'daily_briefing')
-      .single(),
-    supabase
-      .from('fin_wholesale_daily')
-      .select('date, segment, order_count')
-      .gte('date', `${new Date().getFullYear() - 1}-01-01`),
-    supabase
-      .from('fin_cashflow_monthly')
-      .select('ending_cash, net_cash_flow')
-      .order('month', { ascending: false })
-      .limit(3),
   ])
 
-  const pnl = pnlResult.data ?? []
-  const pnlSpark6 = pnl.slice(0, 6).reverse()
-  const completedSpark = pnl.filter((m) => !m.is_partial)
-  const sparklineRunRate = pnlSpark6.map((_m, idx) => {
-    const windowEnd = pnlSpark6.length - idx
-    const trailSlice = completedSpark.slice(0, Math.max(3, windowEnd))
-    if (trailSlice.length === 0) return 0
-    const avg = trailSlice.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / trailSlice.length
-    return avg * 12
-  })
-  const sparklineRevenueMtd = pnlSpark6.map((m) => Number(m.net_revenue) || 0)
-  const sparklineGrossMargin = pnlSpark6.map((m) => Number(m.gross_margin_pct) || 0)
-  const forecasts = forecastResult.data ?? []
-  const alerts = alertsResult.data ?? []
-  const alertHistory = alertHistoryResult.data ?? []
-  const balance = balanceResult.data?.[0]
-  const lastSync = syncResult.data?.[0]
-  const channelPnl = channelPnlResult.data ?? []
-  const shopifyDaily = shopifyResult.data?.[0]
-  const revenueDaily = revenueDailyResult.data ?? []
-  const briefingRaw = briefingResult.data?.value as
-    | { text?: string; generated_at?: string; valid?: boolean }
-    | null
-  const wholesaleDaily = wholesaleDailyResult.data ?? []
-  const cashflowRows = cashflowResult.data ?? []
-  const cashflowLatest = cashflowRows[0]
+  const pnl = (pnlRes.data ?? []) as PnlRow[]
+  const bs = (bsRes.data ?? []) as BsRow[]
+  const cf = (cfRes.data ?? []) as CfRow[]
+  const apAging = (apRes.data ?? []) as ApRow[]
+  const arAging = (arRes.data ?? []) as ArRow[]
+  const shopifyDaily = (sdRes.data ?? [])[0] as ShopifyDaily | undefined
 
-  const latest = pnl[0]
-  const latestMonth = latest?.month
-  const priorYearMonth = latestMonth
-    ? (() => {
-        const d = new Date(String(latestMonth) + 'T00:00:00')
-        d.setFullYear(d.getFullYear() - 1)
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-      })()
-    : null
-  const priorYear = priorYearMonth
-    ? pnl.find((r) => String(r.month) === priorYearMonth) ?? null
-    : null
+  // ---- KPI HEADER CALCULATIONS ----
+  const latestBs = bs[0]
+  const cashPosition = latestBs?.cash_and_equivalents ?? 0
+  const inventoryValue = latestBs?.inventory_value ?? 0
+  const fivePercentReserve = inventoryValue * 0.05
 
-  const latestRevenue = latest ? Number(latest.net_revenue) || 0 : null
-  const priorRevenue = priorYear ? Number(priorYear.net_revenue) || 0 : null
-
-  const today = new Date()
-  const dayOfMonth = today.getDate()
-  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
-
-  const proratedLatestRevenue =
-    latestRevenue !== null && latest?.is_partial && dayOfMonth > 0
-      ? (latestRevenue / dayOfMonth) * daysInMonth
-      : latestRevenue
-
-  const completedMonths = pnl.filter((m) => !m.is_partial)
-  const trailing12 = completedMonths.slice(0, 12)
-  const trailing12Sum = trailing12.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
-  const trailing12Count = trailing12.length
-
-  const pyMonths = completedMonths.slice(12, 24)
-  const pyTotalRevenue = pyMonths.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
-  const seasonalIndices = new Map<number, number>()
-  if (pyMonths.length >= 12 && pyTotalRevenue > 0) {
-    for (const m of pyMonths) {
-      const mo = new Date(String(m.month) + 'T00:00:00').getMonth()
-      seasonalIndices.set(mo, (Number(m.net_revenue) || 0) / pyTotalRevenue)
-    }
-  }
-
-  let runRate: number | null = null
-  let runRateMethod = ''
-  if (trailing12Count >= 12 && seasonalIndices.size === 12) {
-    const latestMo = latest ? new Date(String(latest.month) + 'T00:00:00').getMonth() : -1
-    const rawIdx = seasonalIndices.get(latestMo) ?? (1 / 12)
-    const currentIdx = Math.max(1 / 24, Math.min(1 / 6, rawIdx))
-    const baseMonthRevenue = proratedLatestRevenue ?? 0
-    runRate = baseMonthRevenue / currentIdx
-    runRateMethod = 'seasonally adjusted'
-  } else if (trailing12Count >= 3) {
-    runRate = (trailing12Sum / trailing12Count) * 12
-    runRateMethod = `${trailing12Count}mo avg × 12`
-  } else if (proratedLatestRevenue !== null) {
-    runRate = proratedLatestRevenue * 12
-    runRateMethod = latest?.is_partial ? 'prorated × 12' : 'latest mo × 12'
-  }
-
-  const trailing12Mean = trailing12Count > 0 ? trailing12Sum / trailing12Count : 0
-  const trailing12Std = trailing12Count > 1
-    ? Math.sqrt(
-        trailing12.reduce((s, m) => {
-          const v = Number(m.net_revenue) || 0
-          return s + (v - trailing12Mean) ** 2
-        }, 0) / (trailing12Count - 1)
-      )
+  const completedCf = cf.filter((_r, i) => i > 0 || true).slice(0, 3)
+  const avgNetCashFlow = completedCf.length > 0
+    ? completedCf.reduce((s, r) => s + (r.net_cash_flow ?? 0), 0) / completedCf.length
     : 0
-  const outlierThreshold = trailing12Mean + 2 * trailing12Std
-  const normalizedMonths = trailing12Std > 0
-    ? trailing12.filter((m) => (Number(m.net_revenue) || 0) <= outlierThreshold)
-    : trailing12
-  const hasOutliers = normalizedMonths.length < trailing12Count
-  let normalizedRunRate: number | null = null
-  if (hasOutliers && normalizedMonths.length >= 3) {
-    const normSum = normalizedMonths.reduce((s, m) => s + (Number(m.net_revenue) || 0), 0)
-    normalizedRunRate = (normSum / normalizedMonths.length) * 12
-  }
+  const weeklyBurnRate = Math.abs(avgNetCashFlow) / WEEKS_PER_MONTH
+  const runwayWeeks = weeklyBurnRate > 0 ? Math.floor(cashPosition / weeklyBurnRate) : 999
 
-  const CHANNEL_KEYS_FOR_GROWTH = ['dtc', 'wholesale_faire', 'wholesale_direct', 'wholesale_key', 'marketplace', 'retail']
-  const channelGrowthRates = new Map<string, number>()
-  let channelWeightedRunRate: number | null = null
+  const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
 
-  if (trailing12Count >= 6) {
-    for (const chKey of CHANNEL_KEYS_FOR_GROWTH) {
-      const chRows = channelPnl
-        .filter((r) => r.channel === chKey && !r.is_partial)
-        .sort((a, b) => String(b.month).localeCompare(String(a.month)))
-      const recent3 = chRows.slice(0, 3)
-      const prior3 = chRows.slice(3, 6)
-      if (recent3.length >= 3 && prior3.length >= 3) {
-        const recentAvg = recent3.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / 3
-        const priorAvg = prior3.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / 3
-        const momGrowth = priorAvg > 0 ? (recentAvg - priorAvg) / priorAvg : 0
-        channelGrowthRates.set(chKey, Math.max(-0.5, Math.min(momGrowth, 1.0)))
-      }
-    }
-    if (channelGrowthRates.size > 0) {
-      let fwdSum = 0
-      for (const chKey of CHANNEL_KEYS_FOR_GROWTH) {
-        const chRows = channelPnl
-          .filter((r) => r.channel === chKey)
-          .sort((a, b) => String(b.month).localeCompare(String(a.month)))
-        const latestChRev = Number(chRows[0]?.net_revenue) || 0
-        const g = channelGrowthRates.get(chKey) ?? 0
-        for (let m = 1; m <= 12; m++) {
-          fwdSum += latestChRev * (1 + g) ** m
-        }
-      }
-      channelWeightedRunRate = fwdSum
-    }
-  }
+  const companyPnl = pnl.filter((r) => r.channel === 'company' && !r.is_partial)
+  const latestCompanyPnl = companyPnl[0]
+  const grossToNetPct = latestCompanyPnl && latestCompanyPnl.gross_revenue > 0
+    ? (latestCompanyPnl.net_revenue / latestCompanyPnl.gross_revenue) * 100
+    : 0
 
-  const runRateYoY =
-    priorRevenue && priorRevenue > 0 && runRate !== null
-      ? (((runRate - priorRevenue * 12) / (priorRevenue * 12)) * 100)
-      : null
+  // ---- 13-WEEK CASH FLOW FORECAST ----
+  const trailing3Pnl = companyPnl.slice(0, 3)
+  const avgRevenue = trailing3Pnl.length > 0
+    ? trailing3Pnl.reduce((s, r) => s + r.net_revenue, 0) / trailing3Pnl.length
+    : 0
+  const avgOpex = trailing3Pnl.length > 0
+    ? trailing3Pnl.reduce((s, r) => s + Math.abs(r.total_opex), 0) / trailing3Pnl.length
+    : 0
+  const trailing3Cf = cf.slice(0, 3)
+  const avgTax = trailing3Cf.length > 0
+    ? trailing3Cf.reduce((s, r) => s + Math.abs(r.sales_tax_payments ?? 0), 0) / trailing3Cf.length
+    : 0
 
-  // Cash — prefer balance sheet -> cashflow ending -> forecast starting week 1
-  const latestForecastRunDate = forecasts.length > 0
-    ? String(forecasts[0].forecast_run_date)
-    : null
-  const latestForecastRows = latestForecastRunDate
-    ? forecasts
-      .filter((f) => String(f.forecast_run_date) === latestForecastRunDate)
-      .sort((a, b) => (Number(a.week_number) || 0) - (Number(b.week_number) || 0))
-    : []
-  const forecastStartCash = latestForecastRows.length > 0
-    ? Number(latestForecastRows[0].starting_cash) || null
-    : null
-  const cash =
-    (balance ? Number(balance.cash_and_equivalents) || null : null) ??
-    (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null) ??
-    forecastStartCash
-  const recentOpex = pnl.filter((m) => !m.is_partial).slice(0, 3)
-  const avgOpex =
-    recentOpex.length > 0
-      ? recentOpex.reduce((s, m) => s + (Number(m.total_opex) || 0), 0) /
-        recentOpex.length
-      : null
-  const avgMonthlyBurnFromOpex = avgOpex !== null ? Math.abs(avgOpex) : null
-  const cashflowOutflowRows = cashflowRows.filter(
-    (r) => Number(r.net_cash_flow) < 0
-  )
-  const avgMonthlyBurnFromCashflow =
-    cashflowOutflowRows.length > 0
-      ? cashflowOutflowRows.reduce(
-          (s, r) => s + Math.abs(Number(r.net_cash_flow) || 0),
-          0
-        ) / cashflowOutflowRows.length
-      : null
-  const effectiveMonthlyBurn =
-    avgMonthlyBurnFromCashflow != null && avgMonthlyBurnFromCashflow > 0
-      ? avgMonthlyBurnFromCashflow
-      : avgMonthlyBurnFromOpex != null && avgMonthlyBurnFromOpex > 0
-        ? avgMonthlyBurnFromOpex
-        : null
-  const rawDaysOfCash =
-    cash != null &&
-    effectiveMonthlyBurn != null &&
-    effectiveMonthlyBurn > 0
-      ? Math.round(cash / (effectiveMonthlyBurn / 30))
-      : null
-  const daysOfCash =
-    rawDaysOfCash != null ? Math.min(rawDaysOfCash, 999) : null
+  const weeklyInflow = avgRevenue / WEEKS_PER_MONTH
+  const weeklyOpex = avgOpex / WEEKS_PER_MONTH
+  const weeklyPo = (shopifyDaily?.incoming_inventory_value ?? 0) / 13
+  const weeklyTax = avgTax / WEEKS_PER_MONTH
 
-  // Revenue MTD
-  const revenueYoY =
-    latestRevenue !== null && priorRevenue && priorRevenue > 0
-      ? ((latestRevenue - priorRevenue) / priorRevenue) * 100
-      : null
-
-  const revenuePace =
-    latestRevenue !== null && dayOfMonth > 0
-      ? (latestRevenue / dayOfMonth) * daysInMonth
-      : null
-  const priorMonthRevenue = pnl.length >= 2 ? Number(pnl[1].net_revenue) || 0 : null
-  const paceVsPrior =
-    revenuePace !== null && priorMonthRevenue && priorMonthRevenue > 0
-      ? ((revenuePace - priorMonthRevenue) / priorMonthRevenue) * 100
-      : null
-
-  // Gross Margin
-  const grossMargin = latest ? Number(latest.gross_margin_pct) || null : null
-  const threeMonthMargins = pnl.slice(0, 3).map((m) => Number(m.gross_margin_pct) || 0)
-  const threeMonthAvg =
-    threeMonthMargins.length > 0
-      ? threeMonthMargins.reduce((s, v) => s + v, 0) / threeMonthMargins.length
-      : null
-  const marginTrend =
-    grossMargin !== null && threeMonthAvg !== null
-      ? Number((grossMargin - threeMonthAvg).toFixed(1))
-      : null
-
-  // Blended CAC — use all-channel orders, not just DTC
-  const adSpend = latest ? Number(latest.allocated_ad_spend) || 0 : 0
-  const latestMonthKey = latest ? String(latest.month).slice(0, 7) : null
-  const dtcMonthOrders = latestMonthKey
-    ? revenueDaily.filter((d) => String(d.date).slice(0, 7) === latestMonthKey)
-    : []
-  const dtcNewCustomers = dtcMonthOrders.reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
-  const dtcTotalOrders = dtcMonthOrders.reduce((s, d) => s + (Number(d.order_count) || 0), 0)
-
-  let wholesaleTotalOrders = 0
-  if (latestMonthKey) {
-    for (const row of wholesaleDaily) {
-      if (String(row.date).slice(0, 7) === latestMonthKey) {
-        wholesaleTotalOrders += Number(row.order_count) || 0
-      }
-    }
-  }
-
-  const allChannelOrders = dtcTotalOrders + wholesaleTotalOrders
-  const cacDenominator = dtcNewCustomers > 0 ? dtcNewCustomers : allChannelOrders
-  const blendedCac = calcBlendedCac(Math.abs(adSpend), cacDenominator)
-
-  // Blended LTV — match scope: company revenue / all-channel orders
-  const ltv = calcSimplifiedLtv(
-    latestRevenue ?? 0,
-    allChannelOrders > 0 ? allChannelOrders : 1,
-    grossMargin ?? 50,
-  )
-  const ltvCacRatio = allChannelOrders > 0 ? calcLtvCacRatio(ltv, blendedCac) : null
-
-  // Per-channel CAC / LTV breakout
-  interface ChannelCacLtv {
-    channel: string
-    label: string
-    adSpend: number
-    revenue: number
-    orders: number
-    grossMarginPct: number
-    marginIsProxy: boolean
-    contribMargin: number
-    marginDelta: number | null
-    cac: number | null
-    ltv: number | null
-    ratio: number | null
-    hasOrderData: boolean
-  }
-
-  const BREAKOUT_CHANNELS: Array<{ key: string; label: string }> = [
-    { key: 'dtc', label: 'DTC (Shopify)' },
-    { key: 'wholesale_faire', label: 'Faire' },
-    { key: 'wholesale_direct', label: 'Direct' },
-    { key: 'wholesale_key', label: 'Key Accounts' },
-    { key: 'marketplace', label: 'Marketplace' },
-    { key: 'retail', label: 'Retail' },
-  ]
-
-  const channelMarginTrend = new Map<string, number | null>()
-  for (const { key } of BREAKOUT_CHANNELS) {
-    const rows = channelPnl
-      .filter((r) => r.channel === key)
-      .sort((a, b) => String(b.month).localeCompare(String(a.month)))
-      .slice(0, 3)
-    if (rows.length >= 2) {
-      const latest = Number(rows[0].gross_margin_pct) || 0
-      const oldest = Number(rows[rows.length - 1].gross_margin_pct) || 0
-      channelMarginTrend.set(key, Number((latest - oldest).toFixed(1)))
-    } else {
-      channelMarginTrend.set(key, null)
-    }
-  }
-
-  const latestChannelKpis = latestMonth
-    ? channelPnl.filter((r) => r.month === latestMonth)
-    : []
-
-  const wholesaleMonthOrders = new Map<string, number>()
-  if (latestMonthKey) {
-    for (const row of wholesaleDaily) {
-      if (String(row.date).slice(0, 7) === latestMonthKey) {
-        const seg = String(row.segment)
-        wholesaleMonthOrders.set(seg, (wholesaleMonthOrders.get(seg) ?? 0) + (Number(row.order_count) || 0))
-      }
-    }
-  }
-
-  const companyMargin = grossMargin ?? 0
-
-  const channelBreakout: ChannelCacLtv[] = BREAKOUT_CHANNELS.map(({ key, label }) => {
-    const kpi = latestChannelKpis.find((r) => r.channel === key)
-    const chAdSpend = Math.abs(Number(kpi?.allocated_ad_spend) || 0)
-    const chRevenue = Number(kpi?.net_revenue) || 0
-    const rawMargin = Number(kpi?.gross_margin_pct) || 0
-    const chCogs = Number(kpi?.cogs) || 0
-    const chContribMargin = Number(kpi?.contribution_margin) || 0
-
-    const needsProxy = chCogs === 0 && chRevenue > 0
-    const chMargin = needsProxy ? companyMargin : rawMargin
-    const effectiveMargin = chMargin > 0 ? chMargin : 50
-
-    let chOrders = 0
-    let hasOrderData = false
-    if (key === 'dtc') {
-      chOrders = dtcTotalOrders
-      hasOrderData = chOrders > 0
-    } else if (key === 'wholesale_faire' || key === 'wholesale_direct') {
-      chOrders = wholesaleMonthOrders.get(key) ?? 0
-      hasOrderData = chOrders > 0
-    }
-
-    const chCac = chOrders > 0 ? calcBlendedCac(chAdSpend, chOrders) : null
-
-    let chLtv: number | null = null
-    if (chOrders > 0) {
-      chLtv = calcSimplifiedLtv(chRevenue, chOrders, effectiveMargin)
-    } else if (chRevenue > 0) {
-      chLtv = chRevenue * (effectiveMargin / 100)
-    }
-
-    const chRatio = chCac !== null && chCac > 0 && chLtv !== null
-      ? calcLtvCacRatio(chLtv, chCac)
-      : null
-
+  const startingCash = cf[0]?.ending_cash ?? cashPosition
+  const forecastData = Array.from({ length: 13 }, (_, i) => {
+    const weekNum = i + 1
+    const now = new Date()
+    const weekStart = new Date(now.getTime() + i * 7 * 86_400_000)
+    const label = `Wk ${weekNum} ${(weekStart.getMonth() + 1)}/${weekStart.getDate()}`
+    const cumInflows = weeklyInflow * weekNum
+    const cumOutflows = (weeklyOpex + weeklyPo + weeklyTax) * weekNum
+    const projectedBalance = startingCash + cumInflows - cumOutflows
     return {
-      channel: key,
       label,
-      adSpend: chAdSpend,
-      revenue: chRevenue,
-      orders: chOrders,
-      grossMarginPct: chMargin,
-      marginIsProxy: needsProxy,
-      contribMargin: chContribMargin,
-      marginDelta: channelMarginTrend.get(key) ?? null,
-      hasOrderData,
-      cac: chCac,
-      ltv: chRevenue > 0 ? chLtv : null,
-      ratio: chRatio,
+      grossInflow: Math.round(weeklyInflow),
+      openingBalance: Math.round(i === 0 ? startingCash : startingCash + weeklyInflow * i - (weeklyOpex + weeklyPo + weeklyTax) * i),
+      cashInflows: Math.round(weeklyInflow),
+      operatingOutflows: Math.round(weeklyOpex),
+      poPayments: Math.round(weeklyPo),
+      taxReserves: Math.round(weeklyTax),
+      projectedBalance: Math.round(projectedBalance),
     }
   })
 
-  channelBreakout.sort(
-    (a, b) => Math.abs(b.contribMargin) - Math.abs(a.contribMargin),
-  )
+  // ---- GROSS-TO-NET REVENUE BRIDGE ----
+  const bridgeData = latestCompanyPnl ? [
+    { name: 'Gross Revenue', value: latestCompanyPnl.gross_revenue },
+    { name: 'Returns', value: -(Math.abs(latestCompanyPnl.returns)) },
+    { name: 'Discounts', value: -(Math.abs(latestCompanyPnl.discounts)) },
+    { name: 'Faire Fees', value: -(Math.abs(latestCompanyPnl.selling_fees)) },
+    { name: 'Shopify Fees', value: -(Math.abs(latestCompanyPnl.processing_fees) * 0.4) },
+    { name: 'Payment Processing', value: -(Math.abs(latestCompanyPnl.processing_fees) * 0.6) },
+    { name: 'Adjustments', value: latestCompanyPnl.other_income_expenses },
+    { name: 'Shipping Revenue', value: Math.abs(latestCompanyPnl.shipping_income) },
+    { name: 'Net Revenue', value: latestCompanyPnl.net_revenue, isTotal: true },
+  ] : []
 
-  const blendedContribMargin = channelBreakout.reduce(
-    (s, ch) => s + ch.contribMargin,
-    0,
-  )
-
-  // 13-Week Forecast Minimum
-  const forecastCashValues = latestForecastRows
-    .map((f) => Number(f.projected_ending_cash))
-    .filter((v) => Number.isFinite(v))
-  const forecastMin =
-    forecastCashValues.length > 0 ? Math.min(...forecastCashValues) : null
-  const forecastAlert: 'green' | 'yellow' | 'red' | undefined =
-    forecastMin !== null
-      ? forecastMin < 0
-        ? 'red'
-        : forecastMin < 50000
-          ? 'yellow'
-          : 'green'
-      : undefined
-
-  // Committed POs
-  const committedPOs = shopifyDaily
-    ? Number(shopifyDaily.incoming_inventory_value) || null
-    : null
-  const posCashPct =
-    committedPOs && cash && cash > 0
-      ? ((committedPOs / cash) * 100).toFixed(0)
-      : null
-
-  const WHOLESALE_KEYS_SET = new Set(['wholesale_faire', 'wholesale_direct', 'wholesale_key'])
-
-  const DISPLAY_CHANNELS: Array<{ key: string; label: string; color: string }> = [
-    { key: 'dtc', label: 'DTC', color: 'hsl(221 83% 53%)' },
-    { key: 'wholesale', label: 'Wholesale', color: 'hsl(262 83% 58%)' },
-    { key: 'retail', label: 'Retail', color: 'hsl(152 60% 42%)' },
-    { key: 'marketplace', label: 'Marketplace', color: 'hsl(30 95% 55%)' },
-  ]
-
-  const lastCompletedMonth = completedMonths.length > 0 ? String(completedMonths[0].month) : null
-  const mixMonth = lastCompletedMonth ?? (latestMonth ? String(latestMonth) : null)
-  const mixMonthDate = mixMonth ? new Date(mixMonth + 'T00:00:00') : null
-  const mixPyMonth = mixMonthDate
-    ? (() => {
-        const d = new Date(mixMonthDate)
-        d.setFullYear(d.getFullYear() - 1)
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-      })()
-    : null
-
-  const mixChannelRevenues = new Map<string, number>()
-  const mixPyChannelRevenues = new Map<string, number>()
-
-  for (const row of channelPnl) {
-    const m = String(row.month)
-    const ch = row.channel as string
-    const rev = Math.max(0, Number(row.net_revenue) || 0)
-    const bucket = WHOLESALE_KEYS_SET.has(ch) ? 'wholesale' : ch === 'wholesale' ? null : ch
-    if (!bucket) continue
-
-    if (m === mixMonth) {
-      mixChannelRevenues.set(bucket, (mixChannelRevenues.get(bucket) ?? 0) + rev)
-    } else if (m === mixPyMonth) {
-      mixPyChannelRevenues.set(bucket, (mixPyChannelRevenues.get(bucket) ?? 0) + rev)
-    }
+  // ---- REVENUE LEAKAGE BY CHANNEL ----
+  const channelNames: Record<string, string> = {
+    dtc: 'Shopify DTC',
+    wholesale_faire: 'Faire Wholesale',
+    wholesale_direct: 'Direct Wholesale',
+    wholesale_key: 'Key Accounts',
+    retail: 'Retail',
+    marketplace: 'Marketplaces',
   }
-
-  const channelTotal = [...mixChannelRevenues.values()].reduce((s, v) => s + v, 0)
-  const channelMixData = DISPLAY_CHANNELS.map(({ key, label, color }) => {
-    const val = mixChannelRevenues.get(key) ?? 0
-    const pyVal = mixPyChannelRevenues.get(key) ?? 0
-    const yoyPct = pyVal > 0 ? ((val - pyVal) / pyVal) * 100 : null
-    return { label, value: val, color, yoyPct }
-  }).filter((d) => d.value > 0)
-
-  const completedForChart = pnl.filter((m) => !m.is_partial)
-  const last12 = completedForChart.slice(0, 12).reverse()
-  const hasPriorYear = last12.some((m) => {
-    const d = new Date(String(m.month) + 'T00:00:00')
-    const pyKey = `${d.getFullYear() - 1}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-    return pnl.some((p) => String(p.month) === pyKey && (Number(p.net_revenue) || 0) > 0)
-  })
-
-  const revenueTrend = last12.map((m, idx) => {
-    const monthStr = String(m.month)
-    const d = new Date(monthStr + 'T00:00:00')
-    const pyDate = new Date(d)
-    pyDate.setFullYear(d.getFullYear() - 1)
-    const pyKey = `${pyDate.getFullYear()}-${String(pyDate.getMonth() + 1).padStart(2, '0')}-01`
-    const pyRow = pnl.find((p) => String(p.month) === pyKey)
-    const rev = Number(m.net_revenue) || 0
-    const py = pyRow ? Number(pyRow.net_revenue) || 0 : 0
-    const yoyPct = py > 0 ? ((rev - py) / py) * 100 : null
-    const prevRev = idx > 0 ? Number(last12[idx - 1].net_revenue) || 0 : 0
-    const momPct = idx > 0 && prevRev > 0 ? ((rev - prevRev) / prevRev) * 100 : null
-    return {
-      month: formatMonthLabel(monthStr),
-      revenue: rev,
-      priorYear: py,
-      yoyPct,
-      momPct,
-      isPartial: Boolean(m.is_partial),
-    }
-  })
-
-  if (latest?.is_partial) {
-    const partialRev = Number(latest.net_revenue) || 0
-    const pMonthStr = String(latest.month)
-    const pD = new Date(pMonthStr + 'T00:00:00')
-    const pPyDate = new Date(pD)
-    pPyDate.setFullYear(pD.getFullYear() - 1)
-    const pPyKey = `${pPyDate.getFullYear()}-${String(pPyDate.getMonth() + 1).padStart(2, '0')}-01`
-    const pPyRow = pnl.find((p) => String(p.month) === pPyKey)
-    const pPy = pPyRow ? Number(pPyRow.net_revenue) || 0 : 0
-    const lastCompleteRev = last12.length > 0 ? Number(last12[last12.length - 1].net_revenue) || 0 : 0
-    const pMomPct = lastCompleteRev > 0 ? ((partialRev - lastCompleteRev) / lastCompleteRev) * 100 : null
-    revenueTrend.push({
-      month: formatMonthLabel(pMonthStr) + '*',
-      revenue: partialRev,
-      priorYear: pPy,
-      yoyPct: null,
-      momPct: pMomPct,
-      isPartial: true,
-    })
-  }
-
-  const cashRunwayData = latestForecastRows.map((f) => ({
-    week: `Wk ${f.week_number}`,
-    cash: Number(f.projected_ending_cash) || 0,
+  const latestMonth = companyPnl[0]?.month
+  const channelPnlLatest = latestMonth
+    ? pnl.filter((r) => r.month === latestMonth && r.channel !== 'company' && r.channel !== 'wholesale' && r.gross_revenue > 0)
+    : []
+  const leakageData = channelPnlLatest.map((r) => ({
+    channel: channelNames[r.channel] ?? r.channel,
+    grossRevenue: r.gross_revenue,
+    netRevenue: r.net_revenue,
+    retentionPct: r.gross_revenue > 0 ? (r.net_revenue / r.gross_revenue) * 100 : 0,
   }))
 
-  const alertDayCounts = new Map<string, { red: number; yellow: number }>()
-  for (const a of alertHistory) {
-    const day = String(a.triggered_at).slice(0, 10)
-    const entry = alertDayCounts.get(day) ?? { red: 0, yellow: 0 }
-    if (a.severity === 'red') entry.red++
-    else entry.yellow++
-    alertDayCounts.set(day, entry)
-  }
+  // ---- GROSS-TO-NET TREND (MONTHLY) ----
+  const trendMonths = companyPnl.slice(0, 12).reverse()
+  const trendData = trendMonths.map((r) => ({
+    month: new Date(r.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+    netRetentionPct: r.gross_revenue > 0 ? (r.net_revenue / r.gross_revenue) * 100 : 0,
+    totalLeakage: r.gross_revenue - r.net_revenue,
+  }))
 
-  const alertTimelineData: Array<{ day: string; red: number; yellow: number }> = []
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000)
-    const key = d.toISOString().slice(0, 10)
-    const counts = alertDayCounts.get(key) ?? { red: 0, yellow: 0 }
-    alertTimelineData.push({ day: key.slice(5), ...counts })
+  // ---- MONTHLY BURN RATE TREND ----
+  const burnMonths = companyPnl.slice(0, 12).reverse()
+  const burnData = burnMonths.map((r) => ({
+    month: new Date(r.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short' }),
+    amount: Math.abs(r.total_opex) + Math.abs(r.cogs),
+  }))
+
+  // ---- RUNWAY PROJECTION ----
+  const latestBurn = burnData.length > 0 ? burnData[burnData.length - 1].amount : 0
+  const runwayData = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date()
+    d.setMonth(d.getMonth() + i)
+    return {
+      month: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      balance: Math.max(0, cashPosition - latestBurn * i),
+    }
+  })
+  const dangerBalance = latestBurn * 2
+
+  // ---- AP AGING BUCKETS ----
+  const now = new Date()
+  const apBuckets = new Map<string, number>()
+  for (const item of apAging) {
+    const days = daysBetween(item.created_at, now)
+    const bucket = ageBucket(days)
+    apBuckets.set(bucket, (apBuckets.get(bucket) ?? 0) + Math.abs(item.amount))
   }
+  const apBucketData = ['0-30 days', '31-60 days', '61-90 days', '90+ days'].map((bucket) => ({
+    bucket,
+    amount: apBuckets.get(bucket) ?? 0,
+  }))
+
+  // ---- AR AGING BUCKETS ----
+  const arBuckets = new Map<string, number>()
+  const totalArOutstanding = arAging.reduce((s, r) => s + Math.abs(r.amount), 0)
+  for (const item of arAging) {
+    const days = daysBetween(item.order_date, now)
+    const bucket = ageBucket(days)
+    arBuckets.set(bucket, (arBuckets.get(bucket) ?? 0) + Math.abs(item.amount))
+  }
+  const arBucketData = ['0-30 days', '31-60 days', '61-90 days', '90+ days'].map((bucket) => ({
+    bucket,
+    amount: arBuckets.get(bucket) ?? 0,
+  }))
+
+  // ---- CASH POSITION SUMMARY ----
+  const lowestForecast = Math.min(...forecastData.map((w) => w.projectedBalance))
+  const netTaxReserve = weeklyTax * 13
+  const weeklyBurnNet = weeklyOpex + weeklyPo + weeklyTax
+  const weeksOfRunway = weeklyBurnNet > 0 ? Math.floor(cashPosition / weeklyBurnNet) : 999
+
+  const summaryHealthy = lowestForecast > 0 && runwayWeeks > 8
+  const summaryColor = summaryHealthy ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
 
   return (
-    <>
-      <PageHeader
-        title="CEO Overview"
-        lastSynced={lastSync?.started_at ?? null}
-      />
-
-      <div className="px-6 pb-4">
-        <BriefingCard
-          text={briefingRaw?.text ?? null}
-          generatedAt={briefingRaw?.generated_at ?? null}
-          valid={briefingRaw?.valid ?? true}
-        />
+    <div className="min-h-screen bg-gray-50">
+      {/* Header Bar */}
+      <div className="bg-[#e8594f] text-white">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">Financial Health Dashboard</h1>
+            <p className="text-xs text-white/80 mt-0.5">
+              13-Week Cash Flow &middot; Gross-to-Net Bridge &middot; AP/AR Aging &middot; Burn Rate &middot; Runway &middot; Tax Reserve
+            </p>
+          </div>
+          <Link
+            href="/settings"
+            className="p-2 rounded-lg hover:bg-white/20 transition-colors"
+            title="Settings"
+          >
+            <Settings className="size-5" />
+          </Link>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 px-6 pb-4 md:grid-cols-4">
-        <MetricCard
-          title="Run Rate"
-          description={`Annualized revenue (${runRateMethod})`}
-          value={formatCompact(runRate)}
-          subtitle={[
-            runRateYoY !== null ? `${runRateYoY > 0 ? '+' : ''}${runRateYoY.toFixed(1)}% YoY` : null,
-            normalizedRunRate !== null ? `Normalized: ${formatCompact(normalizedRunRate)}` : null,
-            channelWeightedRunRate !== null ? `Ch-weighted fwd: ${formatCompact(channelWeightedRunRate)}` : null,
-          ].filter(Boolean).join(' · ') || undefined}
-          trend={
-            runRateYoY !== null
-              ? { value: Number(runRateYoY.toFixed(1)), label: 'YoY' }
-              : undefined
-          }
-          sparkline={sparklineRunRate}
-        />
-        <MetricCard
-          title="Cash"
-          description="Bank balance from Finaloop"
-          value={formatCompact(cash)}
-          subtitle={
-            daysOfCash !== null ? `${daysOfCash} days of cash` : undefined
-          }
-        />
-        <MetricCard
-          title="Revenue MTD"
-          description="Net revenue for the current month"
-          value={formatCompact(latestRevenue)}
-          subtitle={
-            latest?.is_partial && revenuePace !== null
-              ? `Pace: ${formatCompact(revenuePace)}${paceVsPrior !== null ? ` (${paceVsPrior > 0 ? '+' : ''}${paceVsPrior.toFixed(0)}% vs prior mo)` : ''}`
-              : latest?.is_partial
-                ? 'Partial month'
-                : undefined
-          }
-          trend={
-            revenueYoY !== null
-              ? { value: Number(revenueYoY.toFixed(1)), label: 'YoY' }
-              : undefined
-          }
-          sparkline={sparklineRevenueMtd}
-        />
-        <MetricCard
-          title="Gross Margin"
-          description="Revenue minus COGS, as %"
-          value={formatPercent(grossMargin)}
-          trend={
-            marginTrend !== null
-              ? { value: marginTrend, label: 'vs 3mo avg' }
-              : undefined
-          }
-          sparkline={sparklineGrossMargin}
-        />
-        <MetricCard
-          title="Blended CAC"
-          description="All channels combined"
-          value={
-            blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'
-          }
-          subtitle={
-            ltvCacRatio !== null
-              ? `LTV:CAC ${ltvCacRatio.toFixed(1)}x`
-              : undefined
-          }
-        />
-        <MetricCard
-          title="13-Week Min"
-          description="Lowest forecasted cash balance"
-          value={forecastMin !== null ? formatCompact(forecastMin) : '\u2014'}
-          subtitle={forecastMin === null ? 'Run forecast to populate' : undefined}
-          alert={forecastAlert}
-        />
-        <MetricCard
-          title="Committed POs"
-          description="Outstanding purchase orders"
-          value={formatCompact(committedPOs)}
-          subtitle={posCashPct ? `${posCashPct}% of cash` : undefined}
-        />
-        <MetricCard
-          title="Alerts"
-          description="Thresholds needing attention"
-          value={formatCount(alerts.length)}
-          alert={alerts.length > 0 ? 'red' : 'green'}
-        />
-      </div>
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Section 1: KPI Header Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <KpiCard label="CASH POSITION" value={fmtFull(cashPosition)} sub="Current bank balance" color="blue" />
+          <KpiCard label="WEEKLY BURN RATE" value={`${fmtFull(weeklyBurnRate)}/wk`} sub={`Avg cash out / week (${WEEKS_PER_MONTH.toFixed(1)} wks)`} color="red" />
+          <KpiCard label="RUNWAY" value={`${runwayWeeks} weeks`} sub={`Weeks until cash = $0`} color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'} />
+          <KpiCard label="TOTAL AP OUTSTANDING" value={fmtFull(totalApOutstanding)} sub="Vendor bills + open POs" color="orange" />
+          <KpiCard label="GROSS-TO-NET" value={fmtPct(grossToNetPct)} sub="Revenue retention ratio" color="blue" />
+        </div>
 
-      <div className="px-6 pb-4">
+        {/* Section 2: 13-Week Cash Flow Forecast */}
         <Card>
           <CardHeader>
-            <CardTitle>CAC & LTV by Channel</CardTitle>
+            <CardTitle>13-Week Cash Flow Forecast</CardTitle>
+            <CardDescription>Projected weekly cash inflows, outflows, and running balance. Cash-at-risk line = break-even ($0).</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="pb-2 pr-4 font-medium">Channel</th>
-                    <th className="pb-2 pr-4 text-right font-medium">Ad Spend</th>
-                    <th className="pb-2 pr-4 text-right font-medium">Revenue</th>
-                    <th className="pb-2 pr-4 text-right font-medium">Margin</th>
-                    <th className="pb-2 pr-4 text-right font-medium">Contrib $</th>
-                    <th className="pb-2 pr-4 text-right font-medium">Orders</th>
-                    <th className="pb-2 pr-4 text-right font-medium">CAC</th>
-                    <th className="pb-2 pr-4 text-right font-medium">LTV</th>
-                    <th className="pb-2 text-right font-medium">LTV:CAC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b bg-muted/30 font-medium">
-                    <td className="py-2 pr-4">Blended</td>
-                    <td className="py-2 pr-4 text-right">{formatCompact(Math.abs(adSpend))}</td>
-                    <td className="py-2 pr-4 text-right">{formatCompact(latestRevenue)}</td>
-                    <td className="py-2 pr-4 text-right">{formatPercent(grossMargin)}</td>
-                    <td className="py-2 pr-4 text-right">{formatCompact(blendedContribMargin)}</td>
-                    <td className="py-2 pr-4 text-right">{formatCount(cacDenominator)}</td>
-                    <td className="py-2 pr-4 text-right">{blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'}</td>
-                    <td className="py-2 pr-4 text-right">{ltv !== null ? formatCurrency(ltv) : '\u2014'}</td>
-                    <td className="py-2 text-right">{ltvCacRatio !== null ? `${ltvCacRatio.toFixed(1)}x` : '\u2014'}</td>
-                  </tr>
-                  {channelBreakout.map((ch) => {
-                    const approx = ch.marginIsProxy || !ch.hasOrderData
-                    return (
-                      <tr key={ch.channel} className="border-b last:border-b-0">
-                        <td className="py-2 pr-4">{ch.label}</td>
-                        <td className="py-2 pr-4 text-right">{ch.adSpend > 0 ? formatCompact(ch.adSpend) : '\u2014'}</td>
-                        <td className="py-2 pr-4 text-right">{ch.revenue > 0 ? formatCompact(ch.revenue) : '\u2014'}</td>
-                        <td className="py-2 pr-4 text-right">
-                          {ch.grossMarginPct > 0 ? (
-                            <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
-                              {ch.marginIsProxy ? '~' : ''}{formatPercent(ch.grossMarginPct)}
-                              {ch.marginDelta !== null && ch.marginDelta !== 0 && (
-                                <span className={ch.marginDelta > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                                  {ch.marginDelta > 0 ? ' ↑' : ' ↓'}
-                                </span>
-                              )}
-                            </span>
-                          ) : '\u2014'}
-                        </td>
-                        <td className="py-2 pr-4 text-right">{formatCompact(ch.contribMargin)}</td>
-                        <td className="py-2 pr-4 text-right">{ch.orders > 0 ? formatCount(ch.orders) : '\u2014'}</td>
-                        <td className="py-2 pr-4 text-right">
-                          {ch.cac !== null ? (
-                            <span>{formatCurrency(ch.cac)}</span>
-                          ) : '\u2014'}
-                        </td>
-                        <td className="py-2 pr-4 text-right">
-                          {ch.ltv !== null ? (
-                            <span className={approx ? 'text-muted-foreground' : undefined}>
-                              {approx ? '~' : ''}{formatCurrency(ch.ltv)}
-                            </span>
-                          ) : '\u2014'}
-                        </td>
-                        <td className="py-2 text-right">
-                          {ch.ratio !== null ? (
-                            <span className={approx ? 'text-muted-foreground' : undefined}>
-                              {approx ? '~' : ''}{ch.ratio.toFixed(1)}x
-                            </span>
-                          ) : '\u2014'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {channelBreakout.some((ch) => ch.marginIsProxy || (!ch.hasOrderData && ch.revenue > 0)) && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                ~ Estimated.
-                {channelBreakout.some((ch) => ch.marginIsProxy) && (
-                  <> Margin uses company blended ({formatPercent(companyMargin)}) where COGS not tracked.</>
-                )}
-                {channelBreakout.some((ch) => !ch.hasOrderData && ch.revenue > 0) && (
-                  <> LTV = gross profit (revenue × margin) where order counts unavailable.</>
-                )}
-              </p>
+            <ForecastComboChart data={forecastData} />
+          </CardContent>
+        </Card>
+
+        {/* Section 3: Gross-to-Net Revenue Bridge */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Gross-to-Net Revenue Bridge &mdash; Last 30 Days</CardTitle>
+            <CardDescription>Where your top-line revenue goes before it hits the bank. Each bar shows what&apos;s subtracted from gross sales to arrive at net cash collected.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {bridgeData.length > 0 ? (
+              <WaterfallChart data={bridgeData} />
+            ) : (
+              <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data available. Run a Finaloop sync from Settings.</p>
             )}
-            <div className="mt-4 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Gross Margin by Channel</p>
-              {channelBreakout
-                .filter((ch) => ch.revenue > 0)
-                .sort((a, b) => b.grossMarginPct - a.grossMarginPct)
-                .map((ch) => (
-                  <div key={ch.channel} className="flex items-center gap-3">
-                    <span className="w-24 shrink-0 text-xs text-muted-foreground">{ch.label}</span>
-                    <div className="relative h-4 flex-1 overflow-hidden rounded bg-muted">
-                      <div
-                        className="absolute inset-y-0 left-0 rounded bg-primary/60"
-                        style={{ width: `${Math.min(ch.grossMarginPct, 100)}%` }}
-                      />
-                    </div>
-                    <span className="w-12 shrink-0 text-right text-xs tabular-nums">
-                      {ch.marginIsProxy ? '~' : ''}{ch.grossMarginPct.toFixed(1)}%
-                    </span>
-                  </div>
-                ))}
-            </div>
           </CardContent>
         </Card>
-      </div>
 
-      <div className="grid gap-4 px-6 pb-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle>Revenue vs Prior Year</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RevenueBarChart data={revenueTrend} hasPriorYear={hasPriorYear} />
-          </CardContent>
-        </Card>
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>
-              Channel Mix{mixMonth ? ` — ${formatMonthLabel(mixMonth)}` : ''}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChannelMixChart data={channelMixData} total={channelTotal} />
-          </CardContent>
-        </Card>
-      </div>
+        {/* Section 4 & 5: Revenue Leakage + Gross-to-Net Trend */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Leakage by Channel</CardTitle>
+              <CardDescription>Gross-to-net retention rate per channel &mdash; what % of gross revenue you actually keep.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {leakageData.length > 0 ? (
+                <GroupedBarChart data={leakageData} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No channel data available.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Gross-to-Net Trend (Monthly)</CardTitle>
+              <CardDescription>Net retention % over time &mdash; are you keeping more or less of each dollar?</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {trendData.length > 0 ? (
+                <DualAxisLineChart data={trendData} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No trend data available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-      <div className="px-6 pb-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>13-Week Cash Runway</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CashRunwayChart data={cashRunwayData} />
-          </CardContent>
-        </Card>
-      </div>
+        {/* Section 6 & 7: Burn Rate + Runway */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly Burn Rate Trend</CardTitle>
+              <CardDescription>Total monthly cash outflows (operating + PO + tax reserves).</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {burnData.length > 0 ? (
+                <BurnRateChart data={burnData} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No burn data available.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Runway Projection</CardTitle>
+              <CardDescription>Months of runway remaining at current burn rate.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {runwayData.length > 0 ? (
+                <RunwayAreaChart data={runwayData} dangerWeeks={dangerBalance} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No runway data.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-      <div className="px-6 pb-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Active Alerts</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Last 30 Days</p>
-              <svg viewBox="0 0 300 40" className="h-10 w-full" preserveAspectRatio="none">
-                {alertTimelineData.map((d, i) => {
-                  const x = i * 10
-                  const redH = Math.min(d.red * 10, 40)
-                  const yellowH = Math.min(d.yellow * 10, 40 - redH)
-                  return (
-                    <g key={d.day}>
-                      {redH > 0 && (
-                        <rect x={x} y={40 - redH} width={8} height={redH} rx={1} className="fill-red-500" />
-                      )}
-                      {yellowH > 0 && (
-                        <rect x={x} y={40 - redH - yellowH} width={8} height={yellowH} rx={1} className="fill-amber-400" />
-                      )}
-                    </g>
-                  )
-                })}
-              </svg>
-            </div>
-            <AlertFeedWrapper alerts={alerts} />
-          </CardContent>
-        </Card>
+        {/* Section 8 & 9: AP Aging + AR Aging Tables */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>AP Aging (Incl. Unpaid POs)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {apAging.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>VENDOR / PO</TableHead>
+                      <TableHead>TYPE</TableHead>
+                      <TableHead className="text-right">AGE</TableHead>
+                      <TableHead className="text-right">AMOUNT</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {apAging.slice(0, 10).map((item) => {
+                      const days = daysBetween(item.created_at, now)
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium text-xs">{item.vendor}{item.po_reference ? ` (${item.po_reference})` : ''}</TableCell>
+                          <TableCell className="text-xs">{item.item_type}</TableCell>
+                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>{days} days</TableCell>
+                          <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                    <TableRow className="bg-muted/50 font-semibold">
+                      <TableCell colSpan={3} className="text-xs">Total AP Outstanding</TableCell>
+                      <TableCell className="text-right text-xs">{fmtFull(totalApOutstanding)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AP aging data. Run a Shopify DTC sync.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>AR Aging (Outstanding Receivables)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {arAging.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>CUSTOMER / CHANNEL</TableHead>
+                      <TableHead>TERMS</TableHead>
+                      <TableHead className="text-right">AGE</TableHead>
+                      <TableHead className="text-right">AMOUNT</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {arAging.slice(0, 10).map((item) => {
+                      const days = daysBetween(item.order_date, now)
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium text-xs">{item.customer_name}{item.channel ? ` (${item.channel})` : ''}</TableCell>
+                          <TableCell className="text-xs">{item.terms}</TableCell>
+                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>{days} days</TableCell>
+                          <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                    <TableRow className="bg-muted/50 font-semibold">
+                      <TableCell colSpan={3} className="text-xs">Total AR Outstanding</TableCell>
+                      <TableCell className="text-right text-xs">{fmtFull(totalArOutstanding)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AR aging data. Run a Shopify Wholesale sync.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Section 10 & 11: AP/AR Aging Bucket Charts */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>AP Aging Buckets</CardTitle>
+              <CardDescription>Payables by aging period.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <HorizontalBarChart data={apBucketData} color="#3b82f6" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>AR Aging Buckets</CardTitle>
+              <CardDescription>Receivables by aging period.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <HorizontalBarChart data={arBucketData} color="#22c55e" />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Section 12: Cash Position Summary */}
+        <div className={`rounded-xl border p-6 ${summaryColor}`}>
+          <h3 className="font-bold text-base mb-2">Cash Position Summary</h3>
+          <p className="text-sm leading-relaxed">
+            Cash remains {summaryHealthy ? 'positive' : 'at risk'} through the 13-week window.
+            Lowest projected balance is {fmtFull(lowestForecast)} (Wk {forecastData.findIndex((w) => w.projectedBalance === lowestForecast) + 1}).
+            Total AP outstanding is {fmtFull(totalApOutstanding)} and selling open POs against AR of {fmtFull(totalArOutstanding)}, leaving a net
+            payables gap of {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}.
+            Tax reserve accruing at {fmtFull(netTaxReserve)} over 13 weeks at {fmtFull(weeklyTax)}/wk effective rate.
+            Weekly burn of {fmtFull(weeklyBurnNet)} gives {weeksOfRunway} weeks of runway from today&apos;s cash position.
+            {runwayWeeks < 12 ? ' Watch Weeks 9-11 — proactive collections or PO deferral recommended.' : ''}
+          </p>
+        </div>
       </div>
-    </>
+    </div>
+  )
+}
+
+function KpiCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
+  const colorMap: Record<string, string> = {
+    blue: 'bg-blue-50 border-blue-200',
+    red: 'bg-red-50 border-red-200',
+    green: 'bg-emerald-50 border-emerald-200',
+    yellow: 'bg-amber-50 border-amber-200',
+    orange: 'bg-orange-50 border-orange-200',
+  }
+  const textMap: Record<string, string> = {
+    blue: 'text-blue-700',
+    red: 'text-red-700',
+    green: 'text-emerald-700',
+    yellow: 'text-amber-700',
+    orange: 'text-orange-700',
+  }
+  return (
+    <div className={`rounded-xl border p-4 ${colorMap[color] ?? 'bg-white border-gray-200'}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={`text-xl font-bold mt-1 ${textMap[color] ?? 'text-foreground'}`}>{value}</p>
+      <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>
+    </div>
   )
 }

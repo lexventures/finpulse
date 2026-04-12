@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { PageHeader } from '@/components/layout/page-header'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { SettingsTabs } from './settings-tabs'
 
 function getSettingValue<T>(rows: Array<{ key: string; value: unknown }>, key: string): T | undefined {
@@ -81,11 +82,16 @@ export default async function SettingsPage() {
   }
 
   return (
-    <>
-      <PageHeader
-        title="Settings"
-        description="Configuration &amp; data status"
-      />
+    <div className="max-w-6xl mx-auto">
+      <div className="flex items-center gap-3 px-6 pt-6 pb-4">
+        <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="size-5" />
+        </Link>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground">Configuration &amp; data status</p>
+        </div>
+      </div>
       <SettingsTabs
         syncLogs={(syncLogsResult.data as never[]) ?? []}
         thresholds={(thresholdsResult.data as never[]) ?? []}
@@ -93,6 +99,6 @@ export default async function SettingsPage() {
         auditLogs={(auditLogsResult.data as never[]) ?? []}
         settings={settings}
       />
-    </>
+    </div>
   )
 }

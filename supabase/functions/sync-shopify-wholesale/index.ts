@@ -96,6 +96,46 @@ interface OrdersResult {
   }
 }
 
+const UNPAID_ORDERS_QUERY = `
+  query UnpaidOrders($query: String!, $cursor: String) {
+    orders(first: 250, query: $query, after: $cursor) {
+      edges {
+        node {
+          id
+          name
+          createdAt
+          displayFinancialStatus
+          customer { displayName }
+          totalPriceSet { shopMoney { amount } }
+          sourceName
+          paymentTerms { paymentTermsName }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`
+
+interface UnpaidOrderEdge {
+  node: {
+    id: string
+    name: string
+    createdAt: string
+    displayFinancialStatus: string
+    customer: { displayName: string } | null
+    totalPriceSet: { shopMoney: { amount: string } }
+    sourceName: string | null
+    paymentTerms: { paymentTermsName: string } | null
+  }
+}
+
+interface UnpaidOrdersResult {
+  orders: {
+    edges: UnpaidOrderEdge[]
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+  }
+}
+
 const FAIRE_SOURCE_PATTERNS = [/faire/i]
 
 function isFaireOrder(sourceName: string | null): boolean {
@@ -285,7 +325,50 @@ Deno.serve(async (req) => {
         }
       }
 
-      const totalRows = wholesaleRows + analyticsRows
+      // 3. Sync AR aging from unpaid/partially_paid orders
+      const arQuery = 'financial_status:unpaid OR financial_status:partially_paid'
+      const arItems: Array<{
+        customer_name: string
+        channel: string
+        terms: string
+        order_id: string
+        order_date: string
+        amount: number
+      }> = []
+
+      let arCursor: string | null = null
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const result = await shopifyGraphQL<UnpaidOrdersResult>(
+          shop, accessToken, UNPAID_ORDERS_QUERY,
+          { query: arQuery, cursor: arCursor },
+        )
+        for (const edge of result.orders.edges) {
+          const node = edge.node
+          arItems.push({
+            customer_name: node.customer?.displayName || 'Unknown',
+            channel: isFaireOrder(node.sourceName) ? 'Faire' : 'Direct',
+            terms: node.paymentTerms?.paymentTermsName || 'NET 30',
+            order_id: node.id,
+            order_date: node.createdAt.slice(0, 10),
+            amount: round(parseFloat(node.totalPriceSet.shopMoney.amount) || 0),
+          })
+        }
+        if (!result.orders.pageInfo.hasNextPage) break
+        arCursor = result.orders.pageInfo.endCursor
+      }
+
+      await supabase.from('fin_ar_aging').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      let arRows = 0
+      if (arItems.length > 0) {
+        for (let i = 0; i < arItems.length; i += 500) {
+          const chunk = arItems.slice(i, i + 500)
+          const { error: arError } = await supabase.from('fin_ar_aging').insert(chunk)
+          if (arError) throw new Error(`fin_ar_aging insert failed: ${arError.message}`)
+        }
+        arRows = arItems.length
+      }
+
+      const totalRows = wholesaleRows + analyticsRows + arRows
       await supabase.from('fin_sync_log').update({
         status: 'success',
         completed_at: new Date().toISOString(),
@@ -296,6 +379,7 @@ Deno.serve(async (req) => {
         success: true,
         wholesale_daily_rows: wholesaleRows,
         analytics_rows: analyticsRows,
+        ar_aging_rows: arRows,
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
