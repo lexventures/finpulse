@@ -57,16 +57,31 @@ const SKIP_ROW_PATTERNS = [
   /^other\s*(income|expenses?)$/i,
 ]
 
-// Company-only patterns for opex / below-the-line items
+// Company-only patterns for opex / below-the-line items.
+// These match both category headers AND individual line items within those categories.
 const COMPANY_FIELD_RULES: Array<{ test: RegExp; field: keyof CompanyExtras }> = [
-  { test: /salaries|wages|employer taxes|employee benefit|payroll|bonus/i, field: 'payroll' },
-  { test: /shipping & fulfillment|fulfillment cost|freight|postage/i, field: 'shipping_fulfillment' },
-  { test: /office|rent\b|insurance|professional services|utilities|bank fees|software|legal|accounting|telephone/i, field: 'ga_expense' },
-  { test: /marketing(?!.*email)|social media|brand|events|sponsorship|pr\b/i, field: 'sm_expense' },
+  { test: /salaries|wages|employer taxes|employee benefit|payroll|bonus|gusto/i, field: 'payroll' },
+  { test: /shipping & fulfillment|shipping & freight|fulfillment cost|freight|postage|auctane|stamps\.com|fedex|ups\b/i, field: 'shipping_fulfillment' },
+  { test: /office|rent\b|insurance|professional services|utilities|bank fees|software|legal|accounting|telephone|general & administrative|operating expense/i, field: 'ga_expense' },
+  { test: /marketing(?!.*email)|social media|brand|events|sponsorship|pr\b|paid online ads/i, field: 'sm_expense' },
   { test: /research|development|r&d/i, field: 'rd_expense' },
-  { test: /depreciation|amortization/i, field: 'depreciation' },
-  { test: /interest|financing|loan\b/i, field: 'interest_financing' },
-  { test: /uncategorized|other income|other expense|miscellaneous|sundry/i, field: 'other_income_expenses' },
+  { test: /depreciation|amortization|equipment\b|leasehold/i, field: 'depreciation' },
+  { test: /interest|financing|loan\b|foreign exchange/i, field: 'interest_financing' },
+  { test: /uncategorized|other income|other expense|miscellaneous|sundry|owner.?s? draw|personal\b|charitable|donation/i, field: 'other_income_expenses' },
+]
+
+// Section headers that set context for vendor-level line items beneath them.
+// When a section header is encountered, all subsequent unmatched vendor lines
+// accumulate into this field until a new section is detected.
+const SECTION_HEADER_RULES: Array<{ test: RegExp; field: keyof CompanyExtras }> = [
+  { test: /^salaries & wages|^payroll|^employee/i, field: 'payroll' },
+  { test: /^shipping & fulfillment|^shipping & freight/i, field: 'shipping_fulfillment' },
+  { test: /^processing fees|^merchant fees/i, field: 'ga_expense' },
+  { test: /^general & administrative|^operating expense|^office|^software|^other operating/i, field: 'ga_expense' },
+  { test: /^marketing\b|^paid online ads|^sales & marketing/i, field: 'sm_expense' },
+  { test: /^depreciation|^amortization/i, field: 'depreciation' },
+  { test: /^interest|^financing/i, field: 'interest_financing' },
+  { test: /^other income|^other expense|^non-operating|^owner.?s? draw|^charitable|^personal/i, field: 'other_income_expenses' },
 ]
 
 // Balance sheet line-item → DB column (case-insensitive contains match)
@@ -506,6 +521,11 @@ function parsePnl(sheet: SheetValues): PnlResult {
   const unrecognizedTotals = new Map<string, number>()
   const warnings: string[] = []
 
+  // Section context: when a section header is found (e.g. "Shipping & fulfillment"),
+  // all subsequent vendor-level lines that don't match any rule are assigned to this field.
+  // Reset to null when a channel-level or new section header is hit.
+  let activeSection: keyof CompanyExtras | null = null
+
   for (let r = headerRow + 1; r < data.length; r++) {
     const row = data[r]
     const lineItem = String(row[0] ?? '').trim()
@@ -516,14 +536,19 @@ function parsePnl(sheet: SheetValues): PnlResult {
       for (const m of months) {
         totalNetSales.set(m.month, parseNumber(row[m.colIndex], r, m.colIndex))
       }
+      activeSection = null
       continue
     }
-    if (SKIP_ROW_PATTERNS.some((p) => p.test(lineItem))) continue
+    if (SKIP_ROW_PATTERNS.some((p) => p.test(lineItem))) {
+      if (/^total\b/i.test(lineItem)) activeSection = null
+      continue
+    }
 
     // Try channel mapping (exact match, case-insensitive)
     const mapping = CHANNEL_MAPPING_BY_LABEL.get(normalizeLineItem(lineItem))
 
     if (mapping) {
+      activeSection = null
       const field = accumulatorField(mapping.type, mapping.pattern)
       for (const m of months) {
         const value = parseNumber(row[m.colIndex], r, m.colIndex)
@@ -538,13 +563,30 @@ function parsePnl(sheet: SheetValues): PnlResult {
       continue
     }
 
-    // Try company-only field mapping
+    // Check if this is a section header that sets context for vendor lines beneath it
+    const sectionRule = SECTION_HEADER_RULES.find((sr) => sr.test.test(lineItem))
+    if (sectionRule) {
+      activeSection = sectionRule.field
+    }
+
+    // Try company-only field mapping (direct match on line item text)
     const companyRule = COMPANY_FIELD_RULES.find((cr) => cr.test.test(lineItem))
     if (companyRule) {
+      if (!sectionRule) activeSection = companyRule.field
       for (const m of months) {
         const value = parseNumber(row[m.colIndex], r, m.colIndex)
         if (value === 0) continue
         accByMonth.get(m.month)!.extras[companyRule.field] += value
+      }
+      continue
+    }
+
+    // If we're inside a known section, assign this vendor line to that section
+    if (activeSection) {
+      for (const m of months) {
+        const value = parseNumber(row[m.colIndex], r, m.colIndex)
+        if (value === 0) continue
+        accByMonth.get(m.month)!.extras[activeSection] += value
       }
       continue
     }
