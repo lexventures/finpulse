@@ -29,7 +29,9 @@ function resolveApiVersion(): ApiVersion {
 function resolveHostName(): string {
   const appUrl = process.env.SHOPIFY_APP_URL
   if (!appUrl) {
-    throw new Error('SHOPIFY_APP_URL is not set')
+    // Host name isn't required for session token decoding paths.
+    // Fallback keeps auth routes operational when SHOPIFY_APP_URL is not set.
+    return 'localhost'
   }
   return new URL(appUrl).host
 }

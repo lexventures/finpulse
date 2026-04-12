@@ -56,9 +56,21 @@ export async function POST(
         }
       }
 
+      const extractedError =
+        typeof functionError === 'object' &&
+        functionError !== null &&
+        'error' in functionError &&
+        typeof (functionError as { error?: unknown }).error === 'string'
+          ? (functionError as { error: string }).error
+          : null
+
+      const topLevelError = extractedError
+        ? `${functionName} failed (${status}): ${extractedError}`
+        : `${functionName} failed (${status}): ${error.message || 'Sync function invocation failed'}`
+
       return NextResponse.json(
         {
-          error: error.message || 'Sync function invocation failed',
+          error: topLevelError,
           function_name: functionName,
           function_status: status,
           function_error: functionError,
