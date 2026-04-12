@@ -156,6 +156,7 @@ export function SettingsTabs({
           <TabsTrigger value={5}>Sync Log</TabsTrigger>
           <TabsTrigger value={6}>Change Log</TabsTrigger>
           <TabsTrigger value={7}>PIN</TabsTrigger>
+          <TabsTrigger value={8}>Setup Guide</TabsTrigger>
         </TabsList>
 
         {/* Tab 0: Dashboard */}
@@ -413,6 +414,209 @@ export function SettingsTabs({
               hasPin={settings.pin_hash_set ?? false}
               protectedPages={settings.pin_protected_pages ?? ['/team', '/scenarios']}
             />
+          </div>
+        </TabsContent>
+
+        {/* Tab 8: Setup Guide */}
+        <TabsContent value={8}>
+          <div className="space-y-6 pt-4 max-w-3xl">
+            <Card>
+              <CardHeader>
+                <CardTitle>How FinPulse Works</CardTitle>
+              </CardHeader>
+              <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-4">
+                <p>
+                  FinPulse is a financial intelligence dashboard that pulls data from three sources:
+                  Finaloop (via Google Sheets), Shopify (via API), and computes CFO-level metrics
+                  automatically. Data syncs daily via Supabase Edge Functions.
+                </p>
+                <h4 className="font-semibold text-base">Data Flow</h4>
+                <ol className="list-decimal list-inside space-y-1 text-sm">
+                  <li>Finaloop auto-exports P&amp;L, Balance Sheet, and Cash Flow to Google Sheets daily</li>
+                  <li>FinPulse reads those sheets via the Google Sheets API and parses financial data into channel-segmented monthly rows</li>
+                  <li>Shopify order and analytics data is pulled via ShopifyQL (aggregated, no individual orders stored)</li>
+                  <li>All data lands in Supabase Postgres, where the dashboard pages query it</li>
+                  <li>The alert engine evaluates 20 thresholds daily and sends email digests via Resend</li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Connecting Finaloop Google Sheets</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Step 1: Create a Google Service Account</h4>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                    <li>Go to <span className="font-mono text-foreground">console.cloud.google.com</span></li>
+                    <li>Create a project (or use an existing one)</li>
+                    <li>Enable the <strong>Google Sheets API</strong>: APIs &amp; Services &rarr; Library &rarr; search &ldquo;Google Sheets API&rdquo; &rarr; Enable</li>
+                    <li>Go to <strong>IAM &amp; Admin &rarr; Service Accounts &rarr; Create Service Account</strong></li>
+                    <li>Name it (e.g. &ldquo;finpulse-sheets&rdquo;), skip optional roles, click Done</li>
+                    <li>Click into the service account &rarr; <strong>Keys</strong> tab &rarr; Add Key &rarr; Create New Key &rarr; <strong>JSON</strong></li>
+                    <li>This downloads a JSON file with the <span className="font-mono">client_email</span> and <span className="font-mono">private_key</span></li>
+                  </ol>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Step 2: Share the Google Sheets</h4>
+                  <p className="text-muted-foreground">
+                    Open each Finaloop Google Sheet (P&amp;L, Balance Sheet, Cash Flow).
+                    Click <strong>Share</strong>, paste the service account email
+                    (e.g. <span className="font-mono">finpulse-sheets@your-project.iam.gserviceaccount.com</span>),
+                    set to <strong>Viewer</strong>, and click Send.
+                    You do NOT need &ldquo;Anyone with the link&rdquo; &mdash; only the service account needs access.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Step 3: Set the Credentials</h4>
+                  <p className="text-muted-foreground">
+                    In your <strong>Supabase Dashboard &rarr; Edge Functions &rarr; Secrets</strong>, add:
+                  </p>
+                  <div className="rounded-md border bg-muted/50 p-3 font-mono text-xs space-y-1">
+                    <p>GOOGLE_SERVICE_ACCOUNT_EMAIL = <span className="text-muted-foreground">(the client_email from the JSON)</span></p>
+                    <p>GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY = <span className="text-muted-foreground">(the private_key from the JSON, starts with -----BEGIN PRIVATE KEY-----)</span></p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Step 4: Enter Sheet IDs</h4>
+                  <p className="text-muted-foreground">
+                    Go to <strong>Settings &rarr; Channels</strong> tab &rarr; Data Sources section.
+                    Paste the full Google Sheets URL or just the Sheet ID for each report.
+                    The Sheet ID is the long string in the URL between <span className="font-mono">/d/</span> and <span className="font-mono">/edit</span>.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Step 5: Run the Sync</h4>
+                  <p className="text-muted-foreground">
+                    Go to <strong>Settings &rarr; Dashboard</strong> tab and click <strong>Run Sync</strong> on the Finaloop card.
+                    The sync will pull data from the Google Sheets, parse it, and populate all financial tables.
+                    After a successful sync, the CEO Overview and channel pages will show real data.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Environment Variables Reference</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Vercel Environment Variables</h4>
+                  <p className="text-muted-foreground">Set in Vercel &rarr; Project Settings &rarr; Environment Variables:</p>
+                  <div className="rounded-md border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/50"><th className="px-3 py-2 text-left font-medium">Variable</th><th className="px-3 py-2 text-left font-medium">Purpose</th></tr></thead>
+                      <tbody className="divide-y">
+                        <tr><td className="px-3 py-1.5 font-mono">SHOPIFY_CLIENT_ID</td><td className="px-3 py-1.5 text-muted-foreground">Shopify app client ID</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">SHOPIFY_CLIENT_SECRET</td><td className="px-3 py-1.5 text-muted-foreground">Shopify app client secret</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">SHOPIFY_APP_URL</td><td className="px-3 py-1.5 text-muted-foreground">Vercel production URL</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">NEXT_PUBLIC_SUPABASE_URL</td><td className="px-3 py-1.5 text-muted-foreground">Supabase project URL</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</td><td className="px-3 py-1.5 text-muted-foreground">Supabase anon key (public)</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">SUPABASE_SERVICE_ROLE_KEY</td><td className="px-3 py-1.5 text-muted-foreground">Supabase service role key (server only)</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Supabase Edge Function Secrets</h4>
+                  <p className="text-muted-foreground">Set in Supabase Dashboard &rarr; Edge Functions &rarr; Secrets:</p>
+                  <div className="rounded-md border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/50"><th className="px-3 py-2 text-left font-medium">Variable</th><th className="px-3 py-2 text-left font-medium">Purpose</th></tr></thead>
+                      <tbody className="divide-y">
+                        <tr><td className="px-3 py-1.5 font-mono">GOOGLE_SERVICE_ACCOUNT_EMAIL</td><td className="px-3 py-1.5 text-muted-foreground">Google service account email for Sheets API</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY</td><td className="px-3 py-1.5 text-muted-foreground">Private key from the service account JSON</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">SHOPIFY_DTC_SHOP</td><td className="px-3 py-1.5 text-muted-foreground">DTC store domain (emilylex.myshopify.com)</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">SHOPIFY_WHOLESALE_SHOP</td><td className="px-3 py-1.5 text-muted-foreground">Wholesale store domain (elsw.myshopify.com)</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">RESEND_API_KEY</td><td className="px-3 py-1.5 text-muted-foreground">Resend API key for alert digest emails</td></tr>
+                        <tr><td className="px-3 py-1.5 font-mono">ANTHROPIC_API_KEY</td><td className="px-3 py-1.5 text-muted-foreground">Claude API key for AI morning briefing</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-muted-foreground italic">
+                    SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are automatically provided to Edge Functions by Supabase.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold">In-App Settings (Settings &rarr; Channels tab)</h4>
+                  <p className="text-muted-foreground">These are stored in the database and editable from the app:</p>
+                  <div className="rounded-md border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/50"><th className="px-3 py-2 text-left font-medium">Setting</th><th className="px-3 py-2 text-left font-medium">Purpose</th></tr></thead>
+                      <tbody className="divide-y">
+                        <tr><td className="px-3 py-1.5">Finaloop Sheet IDs</td><td className="px-3 py-1.5 text-muted-foreground">Google Sheets URLs or IDs for P&amp;L, Balance Sheet, Cash Flow</td></tr>
+                        <tr><td className="px-3 py-1.5">Faire Commission Rate</td><td className="px-3 py-1.5 text-muted-foreground">Marketplace commission % for contribution margin calculation</td></tr>
+                        <tr><td className="px-3 py-1.5">Faire Monthly Ad Budget</td><td className="px-3 py-1.5 text-muted-foreground">Promoted Listings budget cross-reference</td></tr>
+                        <tr><td className="px-3 py-1.5">Key Account Gross Margin</td><td className="px-3 py-1.5 text-muted-foreground">Post-wholesale-discount margin for COGS estimation</td></tr>
+                        <tr><td className="px-3 py-1.5">Shipping Allocation</td><td className="px-3 py-1.5 text-muted-foreground">How shipping costs split across channels</td></tr>
+                        <tr><td className="px-3 py-1.5">Notification Emails</td><td className="px-3 py-1.5 text-muted-foreground">Alert digest and sync failure email addresses</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Shopify Permissions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  FinPulse is installed as a single Shopify app on both the DTC store (emilylex) and
+                  the wholesale store (elsw). It uses these read-only scopes:
+                </p>
+                <div className="rounded-md border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead><tr className="border-b bg-muted/50"><th className="px-3 py-2 text-left font-medium">Scope</th><th className="px-3 py-2 text-left font-medium">Used For</th></tr></thead>
+                    <tbody className="divide-y">
+                      <tr><td className="px-3 py-1.5 font-mono">read_orders</td><td className="px-3 py-1.5 text-muted-foreground">DTC order aggregation, membership detection via tags</td></tr>
+                      <tr><td className="px-3 py-1.5 font-mono">read_products</td><td className="px-3 py-1.5 text-muted-foreground">Product context for inventory queries</td></tr>
+                      <tr><td className="px-3 py-1.5 font-mono">read_inventory</td><td className="px-3 py-1.5 text-muted-foreground">Incoming inventory value (committed PO outflows for cash forecast)</td></tr>
+                      <tr><td className="px-3 py-1.5 font-mono">read_analytics</td><td className="px-3 py-1.5 text-muted-foreground">ShopifyQL for sessions, conversion rate, cart abandonment, revenue by source</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground italic">
+                  Inventory is only pulled from the DTC store (emilylex). The wholesale store shares the same inventory pool.
+                  FinPulse never writes to Shopify &mdash; all scopes are read-only.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Daily Sync Schedule</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm">
+                <p className="text-muted-foreground mb-3">
+                  Edge Functions run sequentially each morning (Eastern time). Configure via pg_cron in Supabase.
+                  You can also trigger any sync manually from the Dashboard tab.
+                </p>
+                <div className="rounded-md border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead><tr className="border-b bg-muted/50"><th className="px-3 py-2 text-left font-medium">Time</th><th className="px-3 py-2 text-left font-medium">Function</th><th className="px-3 py-2 text-left font-medium">Source</th></tr></thead>
+                    <tbody className="divide-y">
+                      <tr><td className="px-3 py-1.5">4:00 AM</td><td className="px-3 py-1.5">sync-shopify-dtc</td><td className="px-3 py-1.5 text-muted-foreground">Shopify emilylex &rarr; daily revenue + membership + inventory</td></tr>
+                      <tr><td className="px-3 py-1.5">4:15 AM</td><td className="px-3 py-1.5">sync-shopify-wholesale</td><td className="px-3 py-1.5 text-muted-foreground">Shopify elsw &rarr; Faire/Direct daily revenue</td></tr>
+                      <tr><td className="px-3 py-1.5">4:30 AM</td><td className="px-3 py-1.5">sync-finaloop-sheets</td><td className="px-3 py-1.5 text-muted-foreground">Google Sheets &rarr; monthly P&amp;L, Balance Sheet, Cash Flow</td></tr>
+                      <tr><td className="px-3 py-1.5">4:45 AM</td><td className="px-3 py-1.5">sync-shopify-analytics</td><td className="px-3 py-1.5 text-muted-foreground">ShopifyQL &rarr; sessions, conversion, cart abandonment</td></tr>
+                      <tr><td className="px-3 py-1.5">5:15 AM</td><td className="px-3 py-1.5">run-alert-engine</td><td className="px-3 py-1.5 text-muted-foreground">Evaluate 20 alert thresholds</td></tr>
+                      <tr><td className="px-3 py-1.5">5:30 AM</td><td className="px-3 py-1.5">generate-briefing</td><td className="px-3 py-1.5 text-muted-foreground">Claude AI morning briefing</td></tr>
+                      <tr><td className="px-3 py-1.5">5:45 AM</td><td className="px-3 py-1.5">send-alert-digest</td><td className="px-3 py-1.5 text-muted-foreground">Email red/yellow alerts via Resend</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
       </Tabs>
