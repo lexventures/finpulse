@@ -141,7 +141,7 @@ export default async function CEOOverviewPage() {
       ? Number((grossMargin - threeMonthAvg).toFixed(1))
       : null
 
-  // Blended CAC (ad spend only — full CAC requires Phase 3 Klaviyo integration)
+  // Blended CAC (ad spend from Finaloop / new customers from Shopify)
   const adSpend = latest ? Number(latest.allocated_ad_spend) || 0 : 0
 
   // 13-Week Forecast Minimum

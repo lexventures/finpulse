@@ -377,8 +377,7 @@ export default async function DTCPage(props: {
         <Card>
           <CardContent className="flex items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">
-              CAC, LTV, and MER metrics will be available after Klaviyo
-              integration (Phase 3)
+              CAC, LTV, and MER metrics coming in Phase 3
             </p>
           </CardContent>
         </Card>

@@ -67,14 +67,13 @@ function durationStr(started: string, completed: string | null): string {
   return `${mins}m ${rem}s`
 }
 
-const SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'klaviyo'] as const
+const SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics'] as const
 
 const SOURCE_LABELS: Record<string, string> = {
   finaloop: 'Finaloop',
   shopify_dtc: 'Shopify DTC',
   shopify_wholesale: 'Shopify Wholesale',
   shopify_analytics: 'Shopify Analytics',
-  klaviyo: 'Klaviyo',
 }
 
 const PLACEHOLDER_TABS: Array<{ label: string; phase: number }> = [
@@ -115,12 +114,11 @@ export function SettingsTabs({ syncLogs }: SettingsTabsProps) {
         {/* Tab 0: Dashboard */}
         <TabsContent value={0}>
           <div className="space-y-4 pt-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               {SOURCES.map((source) => {
                 const log = latestBySource.get(source)
-                const isKlaviyo = source === 'klaviyo'
                 const statusColor: 'green' | 'yellow' | 'red' =
-                  !log || isKlaviyo
+                  !log
                     ? 'red'
                     : log.status === 'success'
                       ? 'green'
@@ -141,11 +139,7 @@ export function SettingsTabs({ syncLogs }: SettingsTabsProps) {
                       />
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      {isKlaviyo && !log ? (
-                        <p className="text-sm text-muted-foreground">
-                          Not configured
-                        </p>
-                      ) : log ? (
+                      {log ? (
                         <>
                           <div className="space-y-1 text-sm">
                             <p className="text-muted-foreground">
