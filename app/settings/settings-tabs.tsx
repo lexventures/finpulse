@@ -1105,20 +1105,21 @@ function PinManagement({
 
 function SyncSourceCard({
   source,
-  log,
+  log: initialLog,
 }: {
   source: string
   log: SyncLog | null
 }) {
   const [syncing, setSyncing] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+  const [log, setLog] = useState(initialLog)
+  const [resultMessage, setResultMessage] = useState<string | null>(null)
 
   const statusColor: 'green' | 'yellow' | 'red' =
     syncing
       ? 'yellow'
       : !log
         ? 'red'
-        : log.status === 'success'
+        : log.status === 'success' || log.status === 'partial'
           ? 'green'
           : log.status === 'error'
             ? 'red'
@@ -1126,17 +1127,38 @@ function SyncSourceCard({
 
   async function handleSync() {
     setSyncing(true)
-    setResult(null)
+    setResultMessage(null)
     try {
       const res = await fetch(`/api/sync/${source}`, { method: 'POST' })
       const body = await res.json().catch(() => null)
       if (res.ok) {
-        setResult('Sync completed')
+        const result = body?.result
+        const rows = result?.rows ?? result?.wholesale_daily_rows ?? 0
+        setResultMessage(`Sync completed — ${rows} rows`)
+        setLog({
+          id: '',
+          source,
+          started_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          status: 'success',
+          rows_synced: rows,
+          error_message: null,
+        })
       } else {
-        setResult(body?.error ?? `Failed (${res.status})`)
+        const errMsg = body?.error ?? `Failed (${res.status})`
+        setResultMessage(errMsg)
+        setLog({
+          id: '',
+          source,
+          started_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          status: 'error',
+          rows_synced: 0,
+          error_message: errMsg,
+        })
       }
     } catch {
-      setResult('Sync request failed')
+      setResultMessage('Sync request failed')
     } finally {
       setSyncing(false)
     }
@@ -1166,6 +1188,16 @@ function SyncSourceCard({
               <span className="text-muted-foreground">Status:</span>
               {statusBadge(log.status)}
             </div>
+            {log.rows_synced > 0 && (
+              <p className="text-muted-foreground">
+                Rows synced: {log.rows_synced}
+              </p>
+            )}
+            {log.error_message && log.status === 'error' && (
+              <p className="text-xs text-destructive truncate max-w-[250px]" title={log.error_message}>
+                {log.error_message}
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">No sync data</p>
@@ -1179,12 +1211,12 @@ function SyncSourceCard({
           <RefreshCw className={cn('size-3', syncing && 'animate-spin')} />
           {syncing ? 'Syncing\u2026' : 'Run Sync'}
         </Button>
-        {result && (
+        {resultMessage && (
           <p className={cn(
             'text-xs',
-            result === 'Sync completed' ? 'text-emerald-600' : 'text-destructive',
+            resultMessage.startsWith('Sync completed') ? 'text-emerald-600' : 'text-destructive',
           )}>
-            {result}
+            {resultMessage}
           </p>
         )}
       </CardContent>
