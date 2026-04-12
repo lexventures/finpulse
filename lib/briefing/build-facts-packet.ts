@@ -154,8 +154,8 @@ export async function buildFactsPacket(): Promise<FactsPacket> {
       ? trailingMargins.reduce((s, v) => s + v, 0) / trailingMargins.length
       : null
 
-  // CAC and LTV
-  const totalAdSpend = dailyMtd.reduce(() => 0, 0) + (Number(companyRow?.allocated_ad_spend) || 0)
+  // CAC and LTV — ad spend from Finaloop P&L (monthly), not daily revenue
+  const totalAdSpend = Math.abs(Number(companyRow?.allocated_ad_spend) || 0)
   const totalNewCustomers = dailyMtd.reduce(
     (sum, d) => sum + (Number(d.new_customer_orders) || 0),
     0,
@@ -176,11 +176,12 @@ export async function buildFactsPacket(): Promise<FactsPacket> {
     ? Number(latestBalance.cash_and_equivalents) || null
     : null
 
-  const monthlyOutflows = latestCashFlow
-    ? Math.abs(Number(latestCashFlow.net_cash_flow) || 0) +
-      (Number(latestCashFlow.cash_from_operations) || 0)
-    : null
-  const dailyBurn = monthlyOutflows ? monthlyOutflows / 30 : null
+  const trailingOpex = pnlTrailing.map((r) => Math.abs(Number(r.total_opex) || 0))
+  const avgMonthlyBurn =
+    trailingOpex.length > 0
+      ? trailingOpex.reduce((s, v) => s + v, 0) / trailingOpex.length
+      : null
+  const dailyBurn = avgMonthlyBurn ? avgMonthlyBurn / 30 : null
   const cashDays =
     cashBalance !== null && dailyBurn && dailyBurn > 0
       ? cashBalance / dailyBurn
