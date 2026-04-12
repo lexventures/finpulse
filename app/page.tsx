@@ -683,8 +683,14 @@ export default async function DashboardPage() {
 
         <div className="grid md:grid-cols-2 gap-6">
           <Card>
-            <CardHeader>
-              <CardTitle>AP Aging (Incl. Unpaid POs)</CardTitle>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <CardTitle className="text-base">AP Aging (Incl. Unpaid POs)</CardTitle>
+              <p
+                className="text-xl font-bold tabular-nums text-orange-700 sm:text-right shrink-0"
+                aria-label={`Total accounts payable outstanding: ${apAging.length > 0 ? fmtFull(totalApOutstanding) : 'no data'}`}
+              >
+                {apAging.length > 0 ? fmtFull(totalApOutstanding) : '—'}
+              </p>
             </CardHeader>
             <CardContent className="p-0">
               {apAging.length > 0 ? (
@@ -729,8 +735,14 @@ export default async function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>AR Aging (Outstanding Receivables)</CardTitle>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <CardTitle className="text-base">AR Aging (Outstanding Receivables)</CardTitle>
+              <p
+                className="text-xl font-bold tabular-nums text-emerald-700 sm:text-right shrink-0"
+                aria-label={`Total accounts receivable outstanding: ${arAging.length > 0 ? fmtFull(totalArOutstanding) : 'no data'}`}
+              >
+                {arAging.length > 0 ? fmtFull(totalArOutstanding) : '—'}
+              </p>
             </CardHeader>
             <CardContent className="p-0">
               {arAging.length > 0 ? (
