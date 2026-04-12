@@ -232,17 +232,95 @@ export function SettingsTabs({
           </div>
         </TabsContent>
 
-        {/* Tab 1: Alert Thresholds */}
+        {/* Tab 1: Alert Thresholds (reference) */}
         <TabsContent value={1}>
           <div className="pt-4">
-            <ThresholdsEditor thresholds={thresholds} />
+            <Card>
+              <CardHeader>
+                <CardTitle>Alert Thresholds</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Thresholds evaluated daily by the alert engine. Red alerts trigger email notifications.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {thresholds.length === 0 ? (
+                  <div className="flex items-center justify-center py-12">
+                    <p className="text-sm text-muted-foreground">No alert thresholds configured</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Metric</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Green</TableHead>
+                        <TableHead className="text-right">Yellow</TableHead>
+                        <TableHead className="text-right">Red</TableHead>
+                        <TableHead className="text-center">Direction</TableHead>
+                        <TableHead className="text-center">Active</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {thresholds.map((t) => (
+                        <TableRow key={t.id}>
+                          <TableCell className="font-medium">{t.metric_label}</TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{t.category}</Badge></TableCell>
+                          <TableCell className="text-right text-emerald-600 dark:text-emerald-400">{t.green_above ?? '\u2014'}</TableCell>
+                          <TableCell className="text-right text-amber-600 dark:text-amber-400">{t.yellow_above ?? '\u2014'}</TableCell>
+                          <TableCell className="text-right text-red-600 dark:text-red-400">{t.red_below ?? '\u2014'}</TableCell>
+                          <TableCell className="text-center text-xs text-muted-foreground">{t.higher_is_better ? 'Higher is better' : 'Lower is better'}</TableCell>
+                          <TableCell className="text-center"><span className={cn('inline-block size-2 rounded-full', t.is_active ? 'bg-emerald-500' : 'bg-muted-foreground/30')} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
-        {/* Tab 2: Financial Benchmarks */}
+        {/* Tab 2: Financial Benchmarks (reference) */}
         <TabsContent value={2}>
           <div className="pt-4">
-            <BenchmarksEditor benchmarks={benchmarks} />
+            <Card>
+              <CardHeader>
+                <CardTitle>Financial Benchmarks</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Industry benchmarks used by the AI briefing for context and by charts for reference lines.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {benchmarks.length === 0 ? (
+                  <div className="flex items-center justify-center py-12">
+                    <p className="text-sm text-muted-foreground">No benchmarks configured</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Metric</TableHead>
+                        <TableHead>Healthy Range</TableHead>
+                        <TableHead>Warning</TableHead>
+                        <TableHead>Context</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {benchmarks.map((b) => (
+                        <TableRow key={b.id}>
+                          <TableCell><Badge variant="outline" className="text-xs">{b.category}</Badge></TableCell>
+                          <TableCell className="font-medium">{b.metric_name}</TableCell>
+                          <TableCell className="text-emerald-600 dark:text-emerald-400">{b.healthy_range}</TableCell>
+                          <TableCell className="text-amber-600 dark:text-amber-400">{b.warning_threshold}</TableCell>
+                          <TableCell className="max-w-[250px] truncate text-xs text-muted-foreground">{b.context_note ?? '\u2014'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
@@ -469,253 +547,6 @@ function NotificationsForm({
   )
 }
 
-function ThresholdsEditor({ thresholds }: { thresholds: AlertThreshold[] }) {
-  const [items, setItems] = useState(thresholds)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  function updateItem(id: string, field: string, value: number | boolean | null) {
-    setItems((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, [field]: value } : t)),
-    )
-    setSaved(false)
-  }
-
-  async function handleSave() {
-    setSaving(true)
-    setSaved(false)
-    try {
-      await fetch('/api/settings/thresholds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thresholds: items }),
-      })
-      setSaved(true)
-    } catch {
-      // silently handle
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Alert Thresholds</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        {items.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">
-              No alert thresholds configured
-            </p>
-          </div>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Metric</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="text-right">Green Above</TableHead>
-                  <TableHead className="text-right">Yellow Above</TableHead>
-                  <TableHead className="text-right">Red Below</TableHead>
-                  <TableHead className="text-center">Direction</TableHead>
-                  <TableHead className="text-center">Active</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell className="font-medium">
-                      {t.metric_label}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {t.category}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="ml-auto w-24 text-right"
-                        value={t.green_above ?? ''}
-                        onChange={(e) =>
-                          updateItem(
-                            t.id,
-                            'green_above',
-                            e.target.value === '' ? null : parseFloat(e.target.value),
-                          )
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="ml-auto w-24 text-right"
-                        value={t.yellow_above ?? ''}
-                        onChange={(e) =>
-                          updateItem(
-                            t.id,
-                            'yellow_above',
-                            e.target.value === '' ? null : parseFloat(e.target.value),
-                          )
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="ml-auto w-24 text-right"
-                        value={t.red_below ?? ''}
-                        onChange={(e) =>
-                          updateItem(
-                            t.id,
-                            'red_below',
-                            e.target.value === '' ? null : parseFloat(e.target.value),
-                          )
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-center text-xs text-muted-foreground">
-                      {t.higher_is_better ? 'Higher is better' : 'Lower is better'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <input
-                        type="checkbox"
-                        checked={t.is_active}
-                        onChange={(e) => updateItem(t.id, 'is_active', e.target.checked)}
-                        className="size-4 rounded border-input accent-emerald-600"
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="flex items-center gap-3 border-t p-4">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Thresholds'}
-              </Button>
-              {saved && (
-                <span className="text-sm text-emerald-600">Saved</span>
-              )}
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function BenchmarksEditor({ benchmarks }: { benchmarks: Benchmark[] }) {
-  const [items, setItems] = useState(benchmarks)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  function updateItem(id: string, field: string, value: string | null) {
-    setItems((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, [field]: value } : b)),
-    )
-    setSaved(false)
-  }
-
-  async function handleSave() {
-    setSaving(true)
-    setSaved(false)
-    try {
-      await fetch('/api/settings/benchmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ benchmarks: items }),
-      })
-      setSaved(true)
-    } catch {
-      // silently handle
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Financial Benchmarks</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        {items.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">
-              No benchmarks configured
-            </p>
-          </div>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Metric</TableHead>
-                  <TableHead>Healthy Range</TableHead>
-                  <TableHead>Warning Threshold</TableHead>
-                  <TableHead>Context Note</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((b) => (
-                  <TableRow key={b.id}>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {b.category}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {b.metric_name}
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        className="w-32"
-                        value={b.healthy_range}
-                        onChange={(e) => updateItem(b.id, 'healthy_range', e.target.value)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        className="w-32"
-                        value={b.warning_threshold}
-                        onChange={(e) => updateItem(b.id, 'warning_threshold', e.target.value)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        className="w-48"
-                        value={b.context_note ?? ''}
-                        onChange={(e) =>
-                          updateItem(b.id, 'context_note', e.target.value || null)
-                        }
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="flex items-center gap-3 border-t p-4">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Benchmarks'}
-              </Button>
-              {saved && (
-                <span className="text-sm text-emerald-600">Saved</span>
-              )}
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
   const [faireRate, setFaireRate] = useState(settings.faire_commission_rate ?? 0)
   const [adBudget, setAdBudget] = useState(settings.faire_monthly_ad_budget ?? 0)
@@ -773,6 +604,11 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
                 value={faireRate}
                 onChange={(e) => { setFaireRate(parseFloat(e.target.value) || 0); setSaved(false) }}
               />
+              <p className="text-xs text-muted-foreground">
+                Faire&apos;s marketplace commission on orders placed through Faire (not Faire Direct). Default 15%.
+                Used to calculate Faire contribution margin: Revenue &minus; COGS &minus; Commission &minus; Ads.
+                Shown separately from Promoted Listings ad spend, which is billed via ACH.
+              </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Faire Monthly Ad Budget ($)</label>
@@ -783,18 +619,27 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
                 value={adBudget}
                 onChange={(e) => { setAdBudget(parseFloat(e.target.value) || 0); setSaved(false) }}
               />
+              <p className="text-xs text-muted-foreground">
+                Faire Promoted Listings monthly budget, billed separately via ACH (not deducted from payouts).
+                Used as a cross-reference until Finaloop categorizes these charges under &ldquo;Paid online ads &minus; Faire.&rdquo;
+              </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Key Account Gross Margin (%)</label>
               <Input
                 type="number"
                 step="0.1"
-                min="0"
-                max="100"
+                min="70"
+                max="85"
                 value={grossMargin}
                 onChange={(e) => { setGrossMargin(parseFloat(e.target.value) || 0); setSaved(false) }}
               />
-              <p className="text-xs text-muted-foreground">Typical range: 70-85%</p>
+              <p className="text-xs text-muted-foreground">
+                Margin on wholesale key account orders (PO/ACH). This is the margin AFTER the wholesale price
+                (e.g., if retail is $50 and wholesale is $25, and COGS is $5.63, margin = ($25 &minus; $5.63) / $25 = 77.5%).
+                Finaloop doesn&apos;t break out key account COGS, so FinPulse calculates it as: Key Account Revenue &times; (1 &minus; this value).
+                Range: 70&ndash;85%.
+              </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Shipping Allocation Method</label>
@@ -806,6 +651,11 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
                 <option value="proportional_to_revenue">Proportional to Revenue</option>
                 <option value="blended_company_wide">Blended Company Wide</option>
               </select>
+              <p className="text-xs text-muted-foreground">
+                How &ldquo;Shipping &amp; freight-out&rdquo; from Finaloop is allocated to channels.
+                &ldquo;Proportional to Revenue&rdquo; splits shipping costs by each channel&apos;s share of total revenue.
+                &ldquo;Blended Company Wide&rdquo; keeps shipping as a single company-level line item (not allocated to channels).
+              </p>
             </div>
           </div>
         </CardContent>

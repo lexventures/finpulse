@@ -25,7 +25,6 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from '@/components/ui/sidebar'
 
 interface NavItem {
@@ -53,15 +52,8 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="px-4 py-5">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-lg font-bold tracking-tight">FinPulse</span>
-          <span className="text-xs text-muted-foreground">
-            ELS Financial Intelligence
-          </span>
-        </div>
-      </SidebarHeader>
-      <SidebarSeparator />
+      <SidebarHeader className="px-4 py-3" />
+
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
