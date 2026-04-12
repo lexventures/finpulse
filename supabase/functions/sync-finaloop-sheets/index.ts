@@ -174,36 +174,36 @@ const COMPANY_FIELD_RULES: Array<{ test: RegExp; field: keyof CompanyExtras }> =
 
 // Balance sheet line-item → DB column (case-insensitive contains match)
 const BS_FIELD_MAP: Array<{ test: RegExp; col: string }> = [
-  { test: /^bank accounts/i, col: 'bank_accounts_total' },
-  { test: /^undeposited funds/i, col: 'undeposited_funds_total' },
-  { test: /^cash and cash equivalents/i, col: 'cash_and_equivalents' },
-  { test: /^inventory/i, col: 'inventory_value' },
-  { test: /^accounts receivable/i, col: 'accounts_receivable' },
+  { test: /bank accounts/i, col: 'bank_accounts_total' },
+  { test: /undeposited funds/i, col: 'undeposited_funds_total' },
+  { test: /cash and cash equivalents|total cash|cash & equivalents/i, col: 'cash_and_equivalents' },
+  { test: /^inventory|inventory value/i, col: 'inventory_value' },
+  { test: /accounts receivable/i, col: 'accounts_receivable' },
   { test: /loans to related/i, col: 'loans_to_related_party' },
   { test: /unidentified payouts/i, col: 'unidentified_payouts' },
-  { test: /^total current assets/i, col: 'total_current_assets' },
-  { test: /^net fixed assets/i, col: 'net_fixed_assets' },
-  { test: /^total assets/i, col: 'total_assets' },
+  { test: /total current assets/i, col: 'total_current_assets' },
+  { test: /net fixed assets/i, col: 'net_fixed_assets' },
+  { test: /total assets/i, col: 'total_assets' },
   { test: /credit card/i, col: 'credit_card_balances' },
-  { test: /^accounts payable/i, col: 'accounts_payable' },
+  { test: /accounts payable/i, col: 'accounts_payable' },
   { test: /sales tax.*liabilit/i, col: 'sales_tax_liability' },
-  { test: /^total current liabilities/i, col: 'total_current_liabilities' },
-  { test: /^total liabilities/i, col: 'total_liabilities' },
-  { test: /^total.*equity/i, col: 'total_equity' },
+  { test: /total current liabilities/i, col: 'total_current_liabilities' },
+  { test: /total liabilities/i, col: 'total_liabilities' },
+  { test: /total.*equity/i, col: 'total_equity' },
   { test: /current year.*net.*profit/i, col: 'current_year_net_profit' },
 ]
 
 // Cash-flow line-item → DB column
 const CF_FIELD_MAP: Array<{ test: RegExp; col: string }> = [
-  { test: /cash from operations/i, col: 'cash_from_operations' },
-  { test: /cash from investing/i, col: 'cash_from_investing' },
-  { test: /cash from financing/i, col: 'cash_from_financing' },
-  { test: /net cash flow/i, col: 'net_cash_flow' },
+  { test: /cash (from|provided by) operations|operating activities/i, col: 'cash_from_operations' },
+  { test: /cash (from|used in) investing|investing activities/i, col: 'cash_from_investing' },
+  { test: /cash (from|used in) financing|financing activities/i, col: 'cash_from_financing' },
+  { test: /net (cash flow|change in cash|increase|decrease)/i, col: 'net_cash_flow' },
   { test: /inventory purchase/i, col: 'inventory_purchases' },
   { test: /owner.?s? distribution/i, col: 'owner_distributions' },
   { test: /sales tax payment/i, col: 'sales_tax_payments' },
-  { test: /(starting|beginning|opening) cash/i, col: 'starting_cash' },
-  { test: /ending cash/i, col: 'ending_cash' },
+  { test: /(starting|beginning|opening) (cash|balance)/i, col: 'starting_cash' },
+  { test: /(ending|closing) (cash|balance)/i, col: 'ending_cash' },
 ]
 
 const MONTH_ABBREVS: Record<string, string> = {
@@ -648,7 +648,8 @@ function parseSimpleSheet(
     monthData.set(m.month, { month: m.month, synced_at: new Date().toISOString() })
   }
   for (let r = headerRow + 1; r < data.length; r++) {
-    const lineItem = String(data[r][0] ?? '').trim()
+    const rawLabel = String(data[r][0] ?? '')
+    const lineItem = rawLabel.replace(/^[\s\u00a0]+/, '').trim()
     if (!lineItem) continue
 
     const rule = fieldMap.find((fm) => fm.test.test(lineItem))
@@ -815,6 +816,15 @@ Deno.serve(async (req) => {
       // 5. Parse & upsert Balance Sheet
       if (bsSheet) {
         const bsRows = parseSimpleSheet(bsSheet, BS_FIELD_MAP)
+        for (const row of bsRows) {
+          if (row.cash_and_equivalents == null || row.cash_and_equivalents === 0) {
+            const bank = Number(row.bank_accounts_total) || 0
+            const undeposited = Number(row.undeposited_funds_total) || 0
+            if (bank > 0 || undeposited > 0) {
+              row.cash_and_equivalents = round2(bank + undeposited)
+            }
+          }
+        }
         if (bsRows.length > 0) {
           const { error: bsError } = await supabase
             .from('fin_balance_sheet_monthly')
