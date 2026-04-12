@@ -108,7 +108,6 @@ const UNPAID_ORDERS_QUERY = `
           customer { displayName }
           totalPriceSet { shopMoney { amount } }
           sourceName
-          paymentTerms { paymentTermsName }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -125,7 +124,6 @@ interface UnpaidOrderEdge {
     customer: { displayName: string } | null
     totalPriceSet: { shopMoney: { amount: string } }
     sourceName: string | null
-    paymentTerms: { paymentTermsName: string } | null
   }
 }
 
@@ -326,7 +324,9 @@ Deno.serve(async (req) => {
       }
 
       // 3. Sync AR aging from unpaid/partially_paid orders
-      const arQuery = 'financial_status:unpaid OR financial_status:partially_paid'
+      // Shopify search: valid values are pending, authorized, partially_paid, etc. — not "unpaid"
+      const arQuery =
+        'financial_status:pending OR financial_status:authorized OR financial_status:partially_paid'
       const arItems: Array<{
         customer_name: string
         channel: string
@@ -347,7 +347,10 @@ Deno.serve(async (req) => {
           arItems.push({
             customer_name: node.customer?.displayName || 'Unknown',
             channel: isFaireOrder(node.sourceName) ? 'Faire' : 'Direct',
-            terms: node.paymentTerms?.paymentTermsName || 'NET 30',
+            // paymentTerms requires read_payment_terms scope; use financial status as context
+            terms: node.displayFinancialStatus
+              ? node.displayFinancialStatus.replace(/_/g, ' ')
+              : 'NET 30',
             order_id: node.id,
             order_date: node.createdAt.slice(0, 10),
             amount: round(parseFloat(node.totalPriceSet.shopMoney.amount) || 0),
