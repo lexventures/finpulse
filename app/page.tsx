@@ -55,6 +55,7 @@ export default async function CEOOverviewPage() {
     shopifyResult,
     revenueDailyResult,
     briefingResult,
+    wholesaleDailyResult,
   ] = await Promise.all([
     supabase
       .from('fin_kpi_monthly')
@@ -85,7 +86,7 @@ export default async function CEOOverviewPage() {
       .limit(1),
     supabase
       .from('fin_kpi_monthly')
-      .select('month, channel, net_revenue')
+      .select('month, channel, net_revenue, allocated_ad_spend, gross_margin_pct')
       .neq('channel', 'company')
       .order('month', { ascending: false }),
     supabase
@@ -103,6 +104,10 @@ export default async function CEOOverviewPage() {
       .select('value')
       .eq('key', 'daily_briefing')
       .single(),
+    supabase
+      .from('fin_wholesale_daily')
+      .select('date, segment, order_count')
+      .gte('date', `${new Date().getFullYear() - 1}-01-01`),
   ])
 
   const pnl = pnlResult.data ?? []
@@ -116,6 +121,7 @@ export default async function CEOOverviewPage() {
   const briefingRaw = briefingResult.data?.value as
     | { text?: string; generated_at?: string; valid?: boolean }
     | null
+  const wholesaleDaily = wholesaleDailyResult.data ?? []
 
   const cashflowLatest = (await supabase
     .from('fin_cashflow_monthly')
@@ -201,6 +207,81 @@ export default async function CEOOverviewPage() {
     grossMargin ?? 50,
   )
   const ltvCacRatio = calcLtvCacRatio(ltv, blendedCac)
+
+  // Per-channel CAC / LTV breakout
+  interface ChannelCacLtv {
+    channel: string
+    label: string
+    adSpend: number
+    revenue: number
+    orders: number
+    grossMarginPct: number
+    marginIsProxy: boolean
+    cac: number | null
+    ltv: number | null
+    ratio: number | null
+  }
+
+  const NO_COGS_CHANNELS = new Set(['retail', 'marketplace', 'wholesale_key'])
+
+  const BREAKOUT_CHANNELS: Array<{ key: string; label: string }> = [
+    { key: 'dtc', label: 'DTC (Shopify)' },
+    { key: 'wholesale_faire', label: 'Faire' },
+    { key: 'wholesale_direct', label: 'Direct' },
+    { key: 'wholesale_key', label: 'Key Accounts' },
+    { key: 'marketplace', label: 'Marketplace' },
+    { key: 'retail', label: 'Retail' },
+  ]
+
+  const latestChannelKpis = latestMonth
+    ? channelPnl.filter((r) => r.month === latestMonth)
+    : []
+
+  const wholesaleMonthOrders = new Map<string, number>()
+  if (latestMonthKey) {
+    for (const row of wholesaleDaily) {
+      if (String(row.date).slice(0, 7) === latestMonthKey) {
+        const seg = String(row.segment)
+        wholesaleMonthOrders.set(seg, (wholesaleMonthOrders.get(seg) ?? 0) + (Number(row.order_count) || 0))
+      }
+    }
+  }
+
+  const companyMargin = grossMargin ?? 0
+
+  const channelBreakout: ChannelCacLtv[] = BREAKOUT_CHANNELS.map(({ key, label }) => {
+    const kpi = latestChannelKpis.find((r) => r.channel === key)
+    const chAdSpend = Math.abs(Number(kpi?.allocated_ad_spend) || 0)
+    const chRevenue = Number(kpi?.net_revenue) || 0
+    const rawMargin = Number(kpi?.gross_margin_pct) || 0
+
+    const needsProxy = NO_COGS_CHANNELS.has(key) && rawMargin === 0 && chRevenue > 0
+    const chMargin = needsProxy ? companyMargin : rawMargin
+
+    let chOrders = 0
+    if (key === 'dtc') {
+      chOrders = newCustomers > 0 ? newCustomers : totalOrders
+    } else if (key === 'wholesale_faire' || key === 'wholesale_direct') {
+      chOrders = wholesaleMonthOrders.get(key) ?? 0
+    }
+
+    const chCac = calcBlendedCac(chAdSpend, chOrders)
+    const chLtv = calcSimplifiedLtv(chRevenue, chOrders > 0 ? chOrders : 1, chMargin > 0 ? chMargin : 50)
+    const chRatio = chCac !== null ? calcLtvCacRatio(chLtv, chCac) : null
+
+    return {
+      channel: key,
+      label,
+      adSpend: chAdSpend,
+      revenue: chRevenue,
+      orders: chOrders,
+      grossMarginPct: chMargin,
+      marginIsProxy: needsProxy,
+      cac: chCac,
+      ltv: chOrders > 0 ? chLtv : null,
+      ratio: chRatio,
+    }
+  })
 
   // 13-Week Forecast Minimum
   const forecastCashValues = latestForecastRows
@@ -333,7 +414,7 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="Blended CAC"
-          description="Ad spend ÷ new customers"
+          description="All channels combined"
           value={
             blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'
           }
@@ -362,6 +443,79 @@ export default async function CEOOverviewPage() {
           value={formatCount(alerts.length)}
           alert={alerts.length > 0 ? 'red' : 'green'}
         />
+      </div>
+
+      <div className="px-6 pb-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>CAC & LTV by Channel</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="pb-2 pr-4 font-medium">Channel</th>
+                    <th className="pb-2 pr-4 text-right font-medium">Ad Spend</th>
+                    <th className="pb-2 pr-4 text-right font-medium">Revenue</th>
+                    <th className="pb-2 pr-4 text-right font-medium">Margin</th>
+                    <th className="pb-2 pr-4 text-right font-medium">Orders</th>
+                    <th className="pb-2 pr-4 text-right font-medium">CAC</th>
+                    <th className="pb-2 pr-4 text-right font-medium">LTV</th>
+                    <th className="pb-2 text-right font-medium">LTV:CAC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b bg-muted/30 font-medium">
+                    <td className="py-2 pr-4">Blended</td>
+                    <td className="py-2 pr-4 text-right">{formatCompact(Math.abs(adSpend))}</td>
+                    <td className="py-2 pr-4 text-right">{formatCompact(latestRevenue)}</td>
+                    <td className="py-2 pr-4 text-right">{formatPercent(grossMargin)}</td>
+                    <td className="py-2 pr-4 text-right">{formatCount(cacDenominator)}</td>
+                    <td className="py-2 pr-4 text-right">{blendedCac !== null ? formatCurrency(blendedCac) : '\u2014'}</td>
+                    <td className="py-2 pr-4 text-right">{ltv !== null ? formatCurrency(ltv) : '\u2014'}</td>
+                    <td className="py-2 text-right">{ltvCacRatio !== null ? `${ltvCacRatio.toFixed(1)}x` : '\u2014'}</td>
+                  </tr>
+                  {channelBreakout.map((ch) => (
+                    <tr key={ch.channel} className="border-b last:border-b-0">
+                      <td className="py-2 pr-4">{ch.label}</td>
+                      <td className="py-2 pr-4 text-right">{ch.adSpend > 0 ? formatCompact(ch.adSpend) : '\u2014'}</td>
+                      <td className="py-2 pr-4 text-right">{ch.revenue > 0 ? formatCompact(ch.revenue) : '\u2014'}</td>
+                      <td className="py-2 pr-4 text-right">
+                        {ch.grossMarginPct > 0 ? (
+                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
+                            {ch.marginIsProxy ? '~' : ''}{formatPercent(ch.grossMarginPct)}
+                          </span>
+                        ) : '\u2014'}
+                      </td>
+                      <td className="py-2 pr-4 text-right">{ch.orders > 0 ? formatCount(ch.orders) : '\u2014'}</td>
+                      <td className="py-2 pr-4 text-right">{ch.cac !== null ? formatCurrency(ch.cac) : '\u2014'}</td>
+                      <td className="py-2 pr-4 text-right">
+                        {ch.ltv !== null ? (
+                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
+                            {ch.marginIsProxy ? '~' : ''}{formatCurrency(ch.ltv)}
+                          </span>
+                        ) : '\u2014'}
+                      </td>
+                      <td className="py-2 text-right">
+                        {ch.ratio !== null ? (
+                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
+                            {ch.marginIsProxy ? '~' : ''}{ch.ratio.toFixed(1)}x
+                          </span>
+                        ) : '\u2014'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {channelBreakout.some((ch) => ch.marginIsProxy) && (
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                ~ Uses company blended margin ({formatPercent(companyMargin)}) — Finaloop does not break out COGS for this channel.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 px-6 pb-4 lg:grid-cols-2">
