@@ -72,6 +72,13 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+  --chart-dtc: #2563eb;
+  --chart-faire: #16a34a;
+  --chart-direct: #d97706;
+  --chart-key: #7c3aed;
+  --chart-retail: #475569;
+  --chart-marketplace: #ea580c;
+  --chart-comparison: #9ca3af;
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
