@@ -13,16 +13,6 @@ function getShopDomain(payload: { dest?: string }): string {
   return shop
 }
 
-function getAuthorizedShops(): string[] {
-  const shops = [
-    process.env.SHOPIFY_DTC_SHOP,
-    process.env.SHOPIFY_WHOLESALE_SHOP,
-  ]
-    .map((s) => s?.trim().toLowerCase())
-    .filter((s): s is string => Boolean(s))
-  return Array.from(new Set(shops))
-}
-
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
   const sessionToken = body?.sessionToken
@@ -64,13 +54,6 @@ export async function POST(request: NextRequest) {
     const shopify = ensureShopify()
     const decoded = await shopify.session.decodeSessionToken(sessionToken)
     const shop = getShopDomain(decoded)
-    const authorizedShops = getAuthorizedShops()
-    if (authorizedShops.length > 0 && !authorizedShops.includes(shop)) {
-      return NextResponse.json(
-        { error: `Unauthorized shop: ${shop}` },
-        { status: 403 },
-      )
-    }
 
     const form = new URLSearchParams({
       client_id: clientId,

@@ -12,6 +12,10 @@ export async function verifyShopifyRequest(
   const token = authHeader.slice('Bearer '.length)
   const shopify = ensureShopify()
   const payload = await shopify.session.decodeSessionToken(token)
-  const shop = payload.dest.replace(/^https:\/\//, '')
+  const dest = typeof payload.dest === 'string' ? payload.dest : ''
+  const shop = dest.replace(/^https?:\/\//, '').split('/')[0]?.toLowerCase() ?? ''
+  if (!shop) {
+    throw new Error('Invalid session token: missing dest')
+  }
   return { shop }
 }
