@@ -725,6 +725,7 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
 function PinManagement({ hasPin }: { hasPin: boolean }) {
   const [newPin, setNewPin] = useState('')
   const [confirmPin, setConfirmPin] = useState('')
+  const [pinHint, setPinHint] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -734,16 +735,12 @@ function PinManagement({ hasPin }: { hasPin: boolean }) {
     setMessage('')
     setError('')
 
-    if (newPin.length < 4 || newPin.length > 6) {
-      setError('PIN must be 4-6 digits')
+    if (newPin.length !== 8) {
+      setError('PIN must be exactly 8 characters')
       return
     }
     if (newPin !== confirmPin) {
       setError('PINs do not match')
-      return
-    }
-    if (!/^\d+$/.test(newPin)) {
-      setError('PIN must be numeric')
       return
     }
 
@@ -752,12 +749,13 @@ function PinManagement({ hasPin }: { hasPin: boolean }) {
       const res = await fetch('/api/settings/pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: newPin }),
+        body: JSON.stringify({ pin: newPin, hint: pinHint }),
       })
       if (res.ok) {
         setMessage('PIN updated successfully')
         setNewPin('')
         setConfirmPin('')
+        setPinHint('')
       } else {
         setError('Failed to update PIN')
       }
@@ -797,25 +795,39 @@ function PinManagement({ hasPin }: { hasPin: boolean }) {
             </label>
             <Input
               type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
+              maxLength={8}
+              minLength={8}
               value={newPin}
               onChange={(e) => setNewPin(e.target.value)}
-              placeholder="4-6 digit PIN"
+              placeholder="8-character PIN"
             />
+            <p className="text-xs text-muted-foreground">
+              Letters, numbers, or a mix. Exactly 8 characters.
+            </p>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Confirm PIN</label>
             <Input
               type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
+              maxLength={8}
+              minLength={8}
               value={confirmPin}
               onChange={(e) => setConfirmPin(e.target.value)}
               placeholder="Re-enter PIN"
             />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Hint (optional)</label>
+            <Input
+              type="text"
+              maxLength={100}
+              value={pinHint}
+              onChange={(e) => setPinHint(e.target.value)}
+              placeholder="e.g. favorite coffee order"
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown after a failed attempt to help you remember
+            </p>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           {message && (
@@ -823,7 +835,7 @@ function PinManagement({ hasPin }: { hasPin: boolean }) {
           )}
           <Button
             type="submit"
-            disabled={saving || !newPin || !confirmPin}
+            disabled={saving || newPin.length !== 8 || !confirmPin}
           >
             {saving ? 'Saving...' : hasPin ? 'Change PIN' : 'Set PIN'}
           </Button>

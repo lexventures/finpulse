@@ -15,13 +15,13 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
   const pin = typeof body?.pin === 'string' ? body.pin.trim() : ''
 
-  if (!pin || pin.length < 4 || pin.length > 6) {
-    return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
+  if (!pin || pin.length !== 8) {
+    return NextResponse.json({ error: 'PIN must be exactly 8 characters' }, { status: 400 })
   }
 
   const supabase = createServiceClient()
 
-  const [hashResult, attemptResult] = await Promise.all([
+  const [hashResult, attemptResult, hintResult] = await Promise.all([
     supabase
       .from('fin_settings')
       .select('value')
@@ -32,6 +32,11 @@ export async function POST(request: NextRequest) {
       .select('value')
       .eq('key', 'pin_attempts')
       .single(),
+    supabase
+      .from('fin_settings')
+      .select('value')
+      .eq('key', 'pin_hint')
+      .single(),
   ])
 
   const pinHash = hashResult.data?.value as string | undefined
@@ -41,6 +46,8 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+
+  const pinHint = (hintResult.data?.value as string) || null
 
   const attempts: AttemptState = attemptResult.data?.value
     ? (JSON.parse(attemptResult.data.value as string) as AttemptState)
@@ -80,7 +87,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
+    return NextResponse.json(
+      { error: 'Incorrect PIN', hint: pinHint },
+      { status: 401 },
+    )
   }
 
   await supabase.from('fin_settings').upsert(
