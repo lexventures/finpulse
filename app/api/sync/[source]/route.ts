@@ -25,15 +25,21 @@ export async function POST(
   }
 
   const functionName = FUNCTION_NAMES[source as SyncSource]
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 
-  // #region agent log — H1/H2: capture env state
+  // #region agent log — H3 verification: capture env + key shape
   const _dbg = {
     hasUrl: Boolean(supabaseUrl),
     urlPrefix: supabaseUrl?.substring(0, 30) ?? '(unset)',
     hasKey: Boolean(serviceRoleKey),
-    keyPrefix: serviceRoleKey ? `${serviceRoleKey.substring(0, 12)}...len=${serviceRoleKey.length}` : '(unset)',
+    keyLen: serviceRoleKey?.length ?? 0,
+    keyStart3: serviceRoleKey?.substring(0, 3) ?? '',
+    keyEnd3: serviceRoleKey?.substring((serviceRoleKey?.length ?? 3) - 3) ?? '',
+    startsWithEy: serviceRoleKey?.startsWith('ey') ?? false,
+    hasDots: (serviceRoleKey?.match(/\./g) ?? []).length,
+    hasNewline: serviceRoleKey?.includes('\n') ?? false,
+    hasSpace: serviceRoleKey?.includes(' ') ?? false,
   }
   // #endregion
 
