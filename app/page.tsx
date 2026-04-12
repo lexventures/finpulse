@@ -12,6 +12,8 @@ import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
 import { HorizontalBarChart } from '@/components/charts/horizontal-bar-chart'
 import { BurnRateChart } from '@/components/charts/burn-rate-chart'
 import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
+import { PinUnlockGate } from '@/components/pin-unlock-gate'
+import { getPinGateForPath } from '@/lib/pin-access-server'
 
 const WEEKS_PER_MONTH = 4.33
 
@@ -147,7 +149,15 @@ function buildFallbackForecast(params: {
   })
 }
 
+/**
+ * Finance aggregates are single-tenant for this deployment; see lib/data-scope.ts.
+ */
 export default async function DashboardPage() {
+  const pinGate = await getPinGateForPath('/')
+  if (pinGate.showGate) {
+    return <PinUnlockGate hint={pinGate.hint} />
+  }
+
   const supabase = createServiceClient()
 
   const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes, fcAllRes] = await Promise.all([

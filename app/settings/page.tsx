@@ -3,6 +3,8 @@ export const dynamic = 'force-dynamic'
 import { createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+import { PinUnlockGate } from '@/components/pin-unlock-gate'
+import { getPinGateForPath } from '@/lib/pin-access-server'
 import { SettingsTabs } from './settings-tabs'
 
 function getSettingValue<T>(rows: Array<{ key: string; value: unknown }>, key: string): T | undefined {
@@ -12,6 +14,11 @@ function getSettingValue<T>(rows: Array<{ key: string; value: unknown }>, key: s
 }
 
 export default async function SettingsPage() {
+  const pinGate = await getPinGateForPath('/settings')
+  if (pinGate.showGate) {
+    return <PinUnlockGate hint={pinGate.hint} />
+  }
+
   const supabase = createServiceClient()
 
   const [syncLogsResult, thresholdsResult, benchmarksResult, auditLogsResult, settingsResult] =

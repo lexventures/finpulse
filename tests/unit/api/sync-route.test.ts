@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
+vi.mock('@/lib/dal', () => ({
+  withAuth: async (
+    _request: Request,
+    handler: (shop: string) => Promise<Response>,
+  ) => handler('test.myshopify.com'),
+}))
+
 import { POST } from '@/app/api/sync/[source]/route'
 
 function mockJsonResponse(body: unknown, status = 200): Response {

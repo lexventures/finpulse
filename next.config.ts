@@ -1,5 +1,9 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
-const nextConfig: NextConfig = {};
+import { validateEnvOrThrow } from './lib/env'
 
-export default nextConfig;
+validateEnvOrThrow()
+
+const nextConfig: NextConfig = {}
+
+export default nextConfig

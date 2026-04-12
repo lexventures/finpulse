@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+import { getShopifySessionToken } from '@/lib/shopify/client-token'
 
 interface SyncLog {
   id: string
@@ -1196,8 +1197,14 @@ function SyncSourceCard({
     setSyncing(true)
     setResultMessage(null)
     try {
+      const token = await getShopifySessionToken()
+      if (!token) {
+        setResultMessage('Open this app inside Shopify admin to run sync.')
+        return
+      }
       const res = await fetch(`/api/sync/${source}`, {
         method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
       })
       const body = await res.json().catch(() => null)
       if (res.ok) {

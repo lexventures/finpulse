@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { withAuth } from '@/lib/dal'
+
 const VALID_SOURCES = ['finaloop', 'kpi_facts', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast', 'briefing'] as const
 type SyncSource = (typeof VALID_SOURCES)[number]
 
@@ -68,89 +70,91 @@ function extractRows(result: InvokeResult): number {
 }
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ source: string }> },
 ) {
-  const { source } = await props.params
+  return withAuth(request, async () => {
+    const { source } = await props.params
 
-  if (!VALID_SOURCES.includes(source as SyncSource)) {
-    return NextResponse.json(
-      { error: `Invalid source: ${source}` },
-      { status: 400 },
-    )
-  }
-
-  const functionName = FUNCTION_NAMES[source as SyncSource]
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return NextResponse.json(
-      { error: 'Missing Supabase configuration' },
-      { status: 500 },
-    )
-  }
-
-  try {
-    const requestedSource = source as SyncSource
-    const chain =
-      requestedSource === 'finaloop'
-        ? ['sync-finaloop-sheets', 'run-kpi-facts', 'run-cash-forecast']
-        : requestedSource === 'kpi_facts'
-          ? ['run-kpi-facts', 'run-cash-forecast']
-          : [functionName]
-
-    const stepResults: Array<{
-      function_name: string
-      function_status: number
-      ok: boolean
-      result: unknown
-    }> = []
-    let syncStatus: 'success' | 'partial' = 'success'
-    let totalRows = 0
-
-    for (const stepName of chain) {
-      const step = await invokeEdgeFunction(supabaseUrl, serviceRoleKey, stepName)
-
-      if (!step.ok) {
-        return NextResponse.json(
-          {
-            error: `${stepName} failed (${step.status}): ${extractErrorBody(step)}`,
-            function_name: stepName,
-            function_status: step.status,
-            function_error: step.parsedBody,
-            pipeline: stepResults,
-          },
-          { status: step.status },
-        )
-      }
-
-      stepResults.push({
-        function_name: stepName,
-        function_status: step.status,
-        ok: true,
-        result: step.parsedBody,
-      })
-      totalRows += extractRows(step)
-
-      if (stepName === 'sync-finaloop-sheets') {
-        const parsed = step.parsedBody as Record<string, unknown> | null
-        if (parsed && parsed.status === 'partial') {
-          syncStatus = 'partial'
-        }
-      }
+    if (!VALID_SOURCES.includes(source as SyncSource)) {
+      return NextResponse.json(
+        { error: `Invalid source: ${source}` },
+        { status: 400 },
+      )
     }
 
-    return NextResponse.json({
-      success: true,
-      result: {
-        status: syncStatus,
-        rows: totalRows,
-        pipeline: stepResults,
-      },
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message }, { status: 500 })
-  }
+    const functionName = FUNCTION_NAMES[source as SyncSource]
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        { error: 'Missing Supabase configuration' },
+        { status: 500 },
+      )
+    }
+
+    try {
+      const requestedSource = source as SyncSource
+      const chain =
+        requestedSource === 'finaloop'
+          ? ['sync-finaloop-sheets', 'run-kpi-facts', 'run-cash-forecast']
+          : requestedSource === 'kpi_facts'
+            ? ['run-kpi-facts', 'run-cash-forecast']
+            : [functionName]
+
+      const stepResults: Array<{
+        function_name: string
+        function_status: number
+        ok: boolean
+        result: unknown
+      }> = []
+      let syncStatus: 'success' | 'partial' = 'success'
+      let totalRows = 0
+
+      for (const stepName of chain) {
+        const step = await invokeEdgeFunction(supabaseUrl, serviceRoleKey, stepName)
+
+        if (!step.ok) {
+          return NextResponse.json(
+            {
+              error: `${stepName} failed (${step.status}): ${extractErrorBody(step)}`,
+              function_name: stepName,
+              function_status: step.status,
+              function_error: step.parsedBody,
+              pipeline: stepResults,
+            },
+            { status: step.status },
+          )
+        }
+
+        stepResults.push({
+          function_name: stepName,
+          function_status: step.status,
+          ok: true,
+          result: step.parsedBody,
+        })
+        totalRows += extractRows(step)
+
+        if (stepName === 'sync-finaloop-sheets') {
+          const parsed = step.parsedBody as Record<string, unknown> | null
+          if (parsed && parsed.status === 'partial') {
+            syncStatus = 'partial'
+          }
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        result: {
+          status: syncStatus,
+          rows: totalRows,
+          pipeline: stepResults,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  })
 }
