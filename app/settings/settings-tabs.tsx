@@ -131,14 +131,6 @@ const SOURCE_LABELS: Record<string, string> = {
   cash_forecast: 'Cash Forecast',
 }
 
-async function getSessionTokenForRequest(): Promise<string> {
-  const shopify = (window as unknown as { shopify?: { idToken: () => Promise<string> } }).shopify
-  if (!shopify?.idToken) {
-    throw new Error('Shopify App Bridge is not ready')
-  }
-  return shopify.idToken()
-}
-
 export function SettingsTabs({
   syncLogs,
   thresholds,
@@ -1138,10 +1130,8 @@ function SyncSourceCard({
     setSyncing(true)
     setResultMessage(null)
     try {
-      const token = await getSessionTokenForRequest()
       const res = await fetch(`/api/sync/${source}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
       })
       const body = await res.json().catch(() => null)
       if (res.ok) {
