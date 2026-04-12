@@ -27,7 +27,9 @@ interface FinAreaChartProps {
   emptyMessage?: string
   referenceLines?: Array<{ y: number; label: string; color: string }>
   gradientFill?: boolean
+  stacked?: boolean
   className?: string
+  yAxisTickFormatter?: (value: number) => string
 }
 
 export function FinAreaChart({
@@ -40,7 +42,9 @@ export function FinAreaChart({
   emptyMessage = 'No data yet',
   referenceLines,
   gradientFill = true,
+  stacked = false,
   className,
+  yAxisTickFormatter,
 }: FinAreaChartProps) {
   if (loading) {
     return <Skeleton className={cn('w-full', className)} style={{ height }} />
@@ -97,6 +101,7 @@ export function FinAreaChart({
           tickMargin={8}
           fontSize={12}
           width={48}
+          tickFormatter={yAxisTickFormatter}
         />
         <ChartTooltip content={<ChartTooltipContent />} />
         {referenceLines?.map((ref, i) => (
@@ -118,6 +123,7 @@ export function FinAreaChart({
             key={key}
             type="monotone"
             dataKey={key}
+            stackId={stacked ? 'stack' : undefined}
             stroke={color}
             strokeWidth={2}
             strokeDasharray={dashed ? '6 3' : undefined}
