@@ -11,6 +11,15 @@ const FUNCTION_NAMES: Record<SyncSource, string> = {
   shopify_analytics: 'sync-shopify-analytics',
 }
 
+function isResponseLike(value: unknown): value is Response {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'status' in value &&
+    'text' in value
+  )
+}
+
 export async function POST(
   _request: NextRequest,
   props: { params: Promise<{ source: string }> },
@@ -33,12 +42,28 @@ export async function POST(
     })
 
     if (error) {
+      const maybeContext = (error as { context?: unknown }).context
+      let status = 500
+      let functionError: unknown = null
+
+      if (isResponseLike(maybeContext)) {
+        status = maybeContext.status || 500
+        const raw = await maybeContext.text()
+        try {
+          functionError = JSON.parse(raw)
+        } catch {
+          functionError = raw
+        }
+      }
+
       return NextResponse.json(
         {
           error: error.message || 'Sync function invocation failed',
-          details: error,
+          function_name: functionName,
+          function_status: status,
+          function_error: functionError,
         },
-        { status: 500 },
+        { status },
       )
     }
 
