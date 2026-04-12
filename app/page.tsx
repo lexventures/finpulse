@@ -92,7 +92,7 @@ export default async function CEOOverviewPage() {
       .limit(1),
     supabase
       .from('fin_revenue_daily')
-      .select('date, new_customer_orders')
+      .select('date, order_count, new_customer_orders')
       .eq('channel', 'dtc')
       .gte('date', `${new Date().getFullYear() - 2}-01-01`),
   ])
@@ -106,6 +106,12 @@ export default async function CEOOverviewPage() {
   const shopifyDaily = shopifyResult.data?.[0]
   const revenueDaily = revenueDailyResult.data ?? []
 
+  const cashflowLatest = (await supabase
+    .from('fin_cashflow_monthly')
+    .select('ending_cash')
+    .order('month', { ascending: false })
+    .limit(1)).data?.[0]
+
   const latest = pnl[0]
   const priorYear = pnl.length >= 13 ? pnl[12] : null
 
@@ -118,8 +124,10 @@ export default async function CEOOverviewPage() {
       ? (((latestRevenue! - priorRevenue) / priorRevenue) * 100)
       : null
 
-  // Cash
-  const cash = balance ? Number(balance.cash_and_equivalents) || null : null
+  // Cash — prefer balance sheet, fall back to cashflow ending_cash
+  const cash =
+    (balance ? Number(balance.cash_and_equivalents) || null : null) ??
+    (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null)
   const recentOpex = pnl.slice(0, 3)
   const avgOpex =
     recentOpex.length > 0
@@ -152,15 +160,17 @@ export default async function CEOOverviewPage() {
       ? Number((grossMargin - threeMonthAvg).toFixed(1))
       : null
 
-  // Blended CAC (ad spend from Finaloop / new customers from Shopify daily)
+  // Blended CAC (ad spend from Finaloop / orders from Shopify daily)
   const adSpend = latest ? Number(latest.allocated_ad_spend) || 0 : 0
   const latestMonthKey = latest ? String(latest.month).slice(0, 7) : null
-  const newCustomersInLatestMonth = latestMonthKey
+  const monthOrders = latestMonthKey
     ? revenueDaily
         .filter((d) => String(d.date).slice(0, 7) === latestMonthKey)
-        .reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
-    : 0
-  const blendedCac = calcBlendedCac(Math.abs(adSpend), newCustomersInLatestMonth)
+    : []
+  const newCustomers = monthOrders.reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
+  const totalOrders = monthOrders.reduce((s, d) => s + (Number(d.order_count) || 0), 0)
+  const cacDenominator = newCustomers > 0 ? newCustomers : totalOrders
+  const blendedCac = calcBlendedCac(Math.abs(adSpend), cacDenominator)
 
   // 13-Week Forecast Minimum
   const forecastCashValues = forecasts
@@ -186,19 +196,41 @@ export default async function CEOOverviewPage() {
       ? ((committedPOs / cash) * 100).toFixed(0)
       : null
 
-  // Channel Donut
+  // Channel Donut — roll up wholesale sub-channels into one slice
+  const WHOLESALE_KEYS = new Set(['wholesale_faire', 'wholesale_direct', 'wholesale_key'])
   const latestMonth = latest?.month
-  const channelData = latestMonth
-    ? channelPnl
-        .filter((r) => r.month === latestMonth)
-        .map((r) => ({
-          name: CHANNEL_LABELS[r.channel as string] ?? (r.channel as string),
-          value: Math.max(0, Number(r.net_revenue) || 0),
-          color:
-            CHANNEL_COLORS[r.channel as string] ?? 'hsl(var(--chart-1))',
-        }))
-        .filter((d) => d.value > 0)
+  const rawChannelData = latestMonth
+    ? channelPnl.filter((r) => r.month === latestMonth)
     : []
+
+  let wholesaleTotal = 0
+  const channelData: Array<{ name: string; value: number; color: string }> = []
+
+  for (const r of rawChannelData) {
+    const ch = r.channel as string
+    const val = Math.max(0, Number(r.net_revenue) || 0)
+    if (val === 0) continue
+
+    if (WHOLESALE_KEYS.has(ch)) {
+      wholesaleTotal += val
+    } else if (ch !== 'wholesale') {
+      channelData.push({
+        name: CHANNEL_LABELS[ch] ?? ch,
+        value: val,
+        color: CHANNEL_COLORS[ch] ?? 'hsl(var(--chart-1))',
+      })
+    }
+  }
+
+  if (wholesaleTotal > 0) {
+    channelData.push({
+      name: 'Wholesale',
+      value: wholesaleTotal,
+      color: CHANNEL_COLORS.wholesale ?? 'hsl(var(--chart-2))',
+    })
+  }
+
+  channelData.sort((a, b) => b.value - a.value)
 
   // Revenue Trend (last 12 months, ascending for chart)
   const revenueTrend = pnl
@@ -275,7 +307,8 @@ export default async function CEOOverviewPage() {
         />
         <MetricCard
           title="13-Week Min"
-          value={formatCompact(forecastMin)}
+          value={forecastMin !== null ? formatCompact(forecastMin) : '\u2014'}
+          subtitle={forecastMin === null ? 'Run forecast to populate' : undefined}
           alert={forecastAlert}
         />
         <MetricCard

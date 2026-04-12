@@ -57,48 +57,65 @@ export function FinDonutChart({
     data.map(({ name, color }) => [name, { label: name, color }])
   )
 
+  const pct = (v: number) =>
+    total > 0 ? `${((v / total) * 100).toFixed(0)}%` : ''
+
   return (
-    <ChartContainer config={config} className={className} style={{ height }}>
-      <PieChart>
-        <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
-        <Pie
-          data={data}
-          dataKey="value"
-          nameKey="name"
-          innerRadius="60%"
-          outerRadius="80%"
-          paddingAngle={2}
-          strokeWidth={0}
-        >
-          {data.map((entry) => (
-            <Cell key={entry.name} fill={entry.color} />
-          ))}
-          <Label
-            position="center"
-            content={({ viewBox }) => {
-              if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
-                return (
-                  <text
-                    x={viewBox.cx}
-                    y={viewBox.cy}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                  >
-                    <tspan
+    <div className={cn('flex items-center gap-6', className)}>
+      <ChartContainer config={config} style={{ height, minWidth: height }}>
+        <PieChart>
+          <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            innerRadius="60%"
+            outerRadius="80%"
+            paddingAngle={2}
+            strokeWidth={0}
+          >
+            {data.map((entry) => (
+              <Cell key={entry.name} fill={entry.color} />
+            ))}
+            <Label
+              position="center"
+              content={({ viewBox }) => {
+                if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
+                  return (
+                    <text
                       x={viewBox.cx}
                       y={viewBox.cy}
-                      className="fill-foreground text-xl font-bold"
+                      textAnchor="middle"
+                      dominantBaseline="middle"
                     >
-                      {label}
-                    </tspan>
-                  </text>
-                )
-              }
-              return null
-            }}
-          />
-        </Pie>
-      </PieChart>
-    </ChartContainer>
+                      <tspan
+                        x={viewBox.cx}
+                        y={viewBox.cy}
+                        className="fill-foreground text-xl font-bold"
+                      >
+                        {label}
+                      </tspan>
+                    </text>
+                  )
+                }
+                return null
+              }}
+            />
+          </Pie>
+        </PieChart>
+      </ChartContainer>
+      <ul className="flex flex-col gap-1.5 text-sm">
+        {data.map((entry) => (
+          <li key={entry.name} className="flex items-center gap-2">
+            <span
+              className="inline-block size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-muted-foreground">{entry.name}</span>
+            <span className="ml-auto font-medium tabular-nums">{pct(entry.value)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
