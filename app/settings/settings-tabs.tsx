@@ -162,61 +162,13 @@ export function SettingsTabs({
         <TabsContent value={0}>
           <div className="space-y-4 pt-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {SOURCES.map((source) => {
-                const log = latestBySource.get(source)
-                const statusColor: 'green' | 'yellow' | 'red' =
-                  !log
-                    ? 'red'
-                    : log.status === 'success'
-                      ? 'green'
-                      : log.status === 'error'
-                        ? 'red'
-                        : 'yellow'
-                return (
-                  <Card key={source}>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                      <CardTitle>{SOURCE_LABELS[source]}</CardTitle>
-                      <span
-                        className={cn(
-                          'inline-block size-2.5 rounded-full',
-                          statusColor === 'green' && 'bg-emerald-500',
-                          statusColor === 'yellow' && 'bg-amber-400',
-                          statusColor === 'red' && 'bg-red-500',
-                        )}
-                      />
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {log ? (
-                        <>
-                          <div className="space-y-1 text-sm">
-                            <p className="text-muted-foreground">
-                              Last sync:{' '}
-                              {format(
-                                new Date(log.started_at),
-                                'MMM d, h:mm a',
-                              )}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">
-                                Status:
-                              </span>
-                              {statusBadge(log.status)}
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          No sync data
-                        </p>
-                      )}
-                      <Button variant="outline" size="sm" disabled>
-                        <RefreshCw className="size-3" />
-                        Re-run Sync
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )
-              })}
+              {SOURCES.map((source) => (
+                <SyncSourceCard
+                  key={source}
+                  source={source}
+                  log={latestBySource.get(source) ?? null}
+                />
+              ))}
             </div>
 
             <Card>
@@ -944,5 +896,94 @@ function PinManagement({
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function SyncSourceCard({
+  source,
+  log,
+}: {
+  source: string
+  log: SyncLog | null
+}) {
+  const [syncing, setSyncing] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+
+  const statusColor: 'green' | 'yellow' | 'red' =
+    syncing
+      ? 'yellow'
+      : !log
+        ? 'red'
+        : log.status === 'success'
+          ? 'green'
+          : log.status === 'error'
+            ? 'red'
+            : 'yellow'
+
+  async function handleSync() {
+    setSyncing(true)
+    setResult(null)
+    try {
+      const res = await fetch(`/api/sync/${source}`, { method: 'POST' })
+      const body = await res.json().catch(() => null)
+      if (res.ok) {
+        setResult('Sync completed')
+      } else {
+        setResult(body?.error ?? `Failed (${res.status})`)
+      }
+    } catch {
+      setResult('Sync request failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>{SOURCE_LABELS[source] ?? source}</CardTitle>
+        <span
+          className={cn(
+            'inline-block size-2.5 rounded-full',
+            statusColor === 'green' && 'bg-emerald-500',
+            statusColor === 'yellow' && 'bg-amber-400',
+            statusColor === 'red' && 'bg-red-500',
+          )}
+        />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {log ? (
+          <div className="space-y-1 text-sm">
+            <p className="text-muted-foreground">
+              Last sync:{' '}
+              {format(new Date(log.started_at), 'MMM d, h:mm a')}
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Status:</span>
+              {statusBadge(log.status)}
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No sync data</p>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={syncing}
+          onClick={handleSync}
+        >
+          <RefreshCw className={cn('size-3', syncing && 'animate-spin')} />
+          {syncing ? 'Syncing\u2026' : 'Run Sync'}
+        </Button>
+        {result && (
+          <p className={cn(
+            'text-xs',
+            result === 'Sync completed' ? 'text-emerald-600' : 'text-destructive',
+          )}>
+            {result}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   )
 }
