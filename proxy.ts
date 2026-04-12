@@ -1,6 +1,15 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 const PUBLIC_PATHS = ['/healthz', '/api/webhooks', '/api/auth']
+const MYSHOPIFY_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i
+
+function resolveFrameAncestors(request: NextRequest): string {
+  const shop = request.nextUrl.searchParams.get('shop')?.toLowerCase()
+  if (shop && MYSHOPIFY_DOMAIN_PATTERN.test(shop)) {
+    return `frame-ancestors https://${shop} https://admin.shopify.com;`
+  }
+  return 'frame-ancestors https://admin.shopify.com https://*.myshopify.com;'
+}
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -18,10 +27,7 @@ export function proxy(request: NextRequest) {
   }
 
   const response = NextResponse.next()
-  response.headers.set(
-    'Content-Security-Policy',
-    'frame-ancestors https://admin.shopify.com https://*.myshopify.com;',
-  )
+  response.headers.set('Content-Security-Policy', resolveFrameAncestors(request))
   return response
 }
 

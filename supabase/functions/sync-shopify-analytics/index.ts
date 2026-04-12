@@ -87,32 +87,19 @@ Deno.serve(async (req) => {
   const syncId = syncLog?.id ?? ''
 
   const shop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
-  const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
-  const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
+  const sessionId = `offline_${shop}`
+  const { data: storedSession, error: sessionError } = await supabase
+    .from('shopify_sessions')
+    .select('access_token')
+    .eq('id', sessionId)
+    .eq('shop', shop)
+    .maybeSingle()
 
-  if (!clientId || !clientSecret) {
-    const msg = 'SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set'
-    await supabase.from('fin_sync_log').update({
-      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
-    }).eq('id', syncId)
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    })
-  }
-
-  let accessToken: string
-  try {
-    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
-    })
-    if (!tokenRes.ok) throw new Error(`Token request failed: ${await tokenRes.text()}`)
-    const tokenData = await tokenRes.json()
-    accessToken = tokenData.access_token
-    if (!accessToken) throw new Error('No access_token in response')
-  } catch (err) {
-    const msg = `Shopify auth failed for ${shop}: ${err instanceof Error ? err.message : err}`
+  const accessToken = storedSession?.access_token ?? null
+  if (sessionError || !accessToken) {
+    const msg = sessionError
+      ? `Failed to load Shopify offline token for ${shop}: ${sessionError.message}`
+      : `Missing Shopify offline token for ${shop}. Open the embedded app in that store to complete token exchange.`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -189,7 +176,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         rows: upsertData.length,
-        date_range: { from: dayRows[0]?.date, to: dayRows.at(-1)?.date },
+        date_range: {
+          from: upsertData[0]?.date ?? null,
+          to: upsertData.at(-1)?.date ?? null,
+        },
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })

@@ -7,15 +7,15 @@ embedded = true
 scopes = "read_orders,read_products,read_inventory,read_analytics,read_reports"
 
 [auth]
-redirect_urls = [ "https://localhost:3000/api/auth/callback" ]
+redirect_urls = [ "https://localhost:3000/api/auth", "https://localhost:3000/api/auth/callback" ]
 
 [webhooks]
-api_version = "2025-04"
+api_version = "2026-04"
 
-  [webhooks.privacy_compliance]
-  customer_deletion_url = "/api/webhooks"
-  customer_data_request_url = "/api/webhooks"
-  shop_deletion_url = "/api/webhooks"
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+compliance_topics = [ "customers/redact", "customers/data_request", "shop/redact" ]
+uri = "/api/webhooks"
 
 [build]
 automatically_update_urls_on_dev = true

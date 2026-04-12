@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { withAuth } from '@/lib/dal'
 import { createServiceClient } from '@/lib/supabase/server'
 
 const CreateSchema = z.object({
@@ -21,119 +22,125 @@ const PatchSchema = z.object({
   is_active: z.boolean().optional(),
 })
 
-export async function GET() {
-  const supabase = createServiceClient()
-  const { data, error } = await supabase
-    .from('fin_headcount')
-    .select('*')
-    .eq('is_active', true)
-    .order('start_date', { ascending: true })
+export async function GET(request: NextRequest) {
+  return withAuth(request, async () => {
+    const supabase = createServiceClient()
+    const { data, error } = await supabase
+      .from('fin_headcount')
+      .select('*')
+      .eq('is_active', true)
+      .order('start_date', { ascending: true })
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
 
-  return NextResponse.json(data)
+    return NextResponse.json(data)
+  })
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null)
-  const parsed = CreateSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? 'Validation failed' },
-      { status: 400 }
-    )
-  }
+  return withAuth(request, async () => {
+    const body = await request.json().catch(() => null)
+    const parsed = CreateSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Validation failed' },
+        { status: 400 }
+      )
+    }
 
-  const { name, role, annual_salary, benefits_annual, start_date } = parsed.data
-  const fully_loaded_annual = annual_salary + benefits_annual
+    const { name, role, annual_salary, benefits_annual, start_date } = parsed.data
+    const fully_loaded_annual = annual_salary + benefits_annual
 
-  const supabase = createServiceClient()
+    const supabase = createServiceClient()
 
-  const { data, error } = await supabase
-    .from('fin_headcount')
-    .insert({
-      name,
-      role,
-      annual_salary,
-      benefits_annual,
-      fully_loaded_annual,
-      start_date,
-      is_active: true,
+    const { data, error } = await supabase
+      .from('fin_headcount')
+      .insert({
+        name,
+        role,
+        annual_salary,
+        benefits_annual,
+        fully_loaded_annual,
+        start_date,
+        is_active: true,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    await supabase.from('fin_audit_log').insert({
+      action: 'headcount.create',
+      entity_type: 'fin_headcount',
+      entity_id: data.id,
+      details: { name, role, annual_salary, benefits_annual, fully_loaded_annual, start_date },
     })
-    .select()
-    .single()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  await supabase.from('fin_audit_log').insert({
-    action: 'headcount.create',
-    entity_type: 'fin_headcount',
-    entity_id: data.id,
-    details: { name, role, annual_salary, benefits_annual, fully_loaded_annual, start_date },
+    return NextResponse.json(data, { status: 201 })
   })
-
-  return NextResponse.json(data, { status: 201 })
 }
 
 export async function PATCH(request: NextRequest) {
-  const body = await request.json().catch(() => null)
-  const parsed = PatchSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? 'Validation failed' },
-      { status: 400 }
-    )
-  }
+  return withAuth(request, async () => {
+    const body = await request.json().catch(() => null)
+    const parsed = PatchSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Validation failed' },
+        { status: 400 }
+      )
+    }
 
-  const { id, ...updates } = parsed.data
+    const { id, ...updates } = parsed.data
 
-  if (
-    updates.annual_salary !== undefined ||
-    updates.benefits_annual !== undefined
-  ) {
+    if (
+      updates.annual_salary !== undefined ||
+      updates.benefits_annual !== undefined
+    ) {
+      const supabase = createServiceClient()
+      const { data: existing } = await supabase
+        .from('fin_headcount')
+        .select('annual_salary, benefits_annual')
+        .eq('id', id)
+        .single()
+
+      if (!existing) {
+        return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+      }
+
+      const salary = updates.annual_salary ?? Number(existing.annual_salary)
+      const benefits = updates.benefits_annual ?? Number(existing.benefits_annual)
+      ;(updates as Record<string, unknown>).fully_loaded_annual = salary + benefits
+    }
+
     const supabase = createServiceClient()
-    const { data: existing } = await supabase
+
+    const { data, error } = await supabase
       .from('fin_headcount')
-      .select('annual_salary, benefits_annual')
+      .update(updates)
       .eq('id', id)
+      .select()
       .single()
 
-    if (!existing) {
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (!data) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     }
 
-    const salary = updates.annual_salary ?? Number(existing.annual_salary)
-    const benefits = updates.benefits_annual ?? Number(existing.benefits_annual)
-    ;(updates as Record<string, unknown>).fully_loaded_annual = salary + benefits
-  }
+    await supabase.from('fin_audit_log').insert({
+      action: 'headcount.update',
+      entity_type: 'fin_headcount',
+      entity_id: id,
+      details: updates,
+    })
 
-  const supabase = createServiceClient()
-
-  const { data, error } = await supabase
-    .from('fin_headcount')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  if (!data) {
-    return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
-  }
-
-  await supabase.from('fin_audit_log').insert({
-    action: 'headcount.update',
-    entity_type: 'fin_headcount',
-    entity_id: id,
-    details: updates,
+    return NextResponse.json(data)
   })
-
-  return NextResponse.json(data)
 }

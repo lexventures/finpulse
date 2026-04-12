@@ -23,7 +23,7 @@ function resolveApiVersion(): ApiVersion {
   if (fromEnv && API_VERSION_BY_ENV[fromEnv]) {
     return API_VERSION_BY_ENV[fromEnv]
   }
-  return ApiVersion.April25
+  return ApiVersion.April26
 }
 
 function resolveHostName(): string {

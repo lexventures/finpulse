@@ -64,11 +64,6 @@ interface ShopifyQLResult {
   }
 }
 
-function mapSourceToSegment(sourceName: string): 'wholesale_faire' | 'wholesale_direct' {
-  if (sourceName.toLowerCase() === 'faire') return 'wholesale_faire'
-  return 'wholesale_direct'
-}
-
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -85,8 +80,6 @@ Deno.serve(async (req) => {
   )
 
   const shop = Deno.env.get('SHOPIFY_WHOLESALE_SHOP') || 'elsw.myshopify.com'
-  const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
-  const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
 
   const { data: syncLog } = await supabase
     .from('fin_sync_log')
@@ -95,29 +88,19 @@ Deno.serve(async (req) => {
     .single()
   const syncId = syncLog?.id ?? ''
 
-  if (!clientId || !clientSecret) {
-    const msg = 'SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set'
-    await supabase.from('fin_sync_log').update({
-      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
-    }).eq('id', syncId)
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    })
-  }
+  const sessionId = `offline_${shop}`
+  const { data: storedSession, error: sessionError } = await supabase
+    .from('shopify_sessions')
+    .select('access_token')
+    .eq('id', sessionId)
+    .eq('shop', shop)
+    .maybeSingle()
 
-  let accessToken: string
-  try {
-    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
-    })
-    if (!tokenRes.ok) throw new Error(`Token request failed: ${await tokenRes.text()}`)
-    const tokenData = await tokenRes.json()
-    accessToken = tokenData.access_token
-    if (!accessToken) throw new Error('No access_token in response')
-  } catch (err) {
-    const msg = `Shopify auth failed for ${shop}: ${err instanceof Error ? err.message : err}`
+  const accessToken = storedSession?.access_token ?? null
+  if (sessionError || !accessToken) {
+    const msg = sessionError
+      ? `Failed to load Shopify offline token for ${shop}: ${sessionError.message}`
+      : `Missing Shopify offline token for ${shop}. Open the embedded app in that store to complete token exchange.`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)

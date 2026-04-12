@@ -23,7 +23,10 @@ export function ShopifyAuthProvider({
 
         await fetch('/api/auth/token-exchange', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sessionToken}`,
+          },
           body: JSON.stringify({ sessionToken }),
         })
       } catch {
