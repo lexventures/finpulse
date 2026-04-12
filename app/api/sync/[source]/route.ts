@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
 
 const VALID_SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics'] as const
 type SyncSource = (typeof VALID_SOURCES)[number]
@@ -28,24 +27,9 @@ export async function POST(
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 
-  // #region agent log — H3 verification: capture env + key shape
-  const _dbg = {
-    hasUrl: Boolean(supabaseUrl),
-    urlPrefix: supabaseUrl?.substring(0, 30) ?? '(unset)',
-    hasKey: Boolean(serviceRoleKey),
-    keyLen: serviceRoleKey?.length ?? 0,
-    keyStart3: serviceRoleKey?.substring(0, 3) ?? '',
-    keyEnd3: serviceRoleKey?.substring((serviceRoleKey?.length ?? 3) - 3) ?? '',
-    startsWithEy: serviceRoleKey?.startsWith('ey') ?? false,
-    hasDots: (serviceRoleKey?.match(/\./g) ?? []).length,
-    hasNewline: serviceRoleKey?.includes('\n') ?? false,
-    hasSpace: serviceRoleKey?.includes(' ') ?? false,
-  }
-  // #endregion
-
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json(
-      { error: 'Missing Supabase configuration', _dbg },
+      { error: 'Missing Supabase configuration' },
       { status: 500 },
     )
   }
@@ -63,29 +47,22 @@ export async function POST(
       },
     )
 
-    // #region agent log — H3/H4: capture raw response
     const rawBody = await res.text()
     let parsedBody: unknown = null
     try { parsedBody = JSON.parse(rawBody) } catch { parsedBody = rawBody }
 
-    const _dbgResponse = {
-      status: res.status,
-      statusText: res.statusText,
-      contentType: res.headers.get('content-type'),
-      bodyLength: rawBody.length,
-      bodyPreview: rawBody.substring(0, 500),
-    }
-    // #endregion
-
     if (!res.ok) {
+      const extracted =
+        typeof parsedBody === 'object' && parsedBody && 'error' in parsedBody
+          ? (parsedBody as { error: string }).error
+          : rawBody.substring(0, 200)
+
       return NextResponse.json(
         {
-          error: `${functionName} failed (${res.status}): ${typeof parsedBody === 'object' && parsedBody && 'error' in parsedBody ? (parsedBody as { error: string }).error : rawBody.substring(0, 200)}`,
+          error: `${functionName} failed (${res.status}): ${extracted}`,
           function_name: functionName,
           function_status: res.status,
           function_error: parsedBody,
-          _dbg,
-          _dbgResponse,
         },
         { status: res.status },
       )
@@ -94,6 +71,6 @@ export async function POST(
     return NextResponse.json({ success: true, result: parsedBody })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message, _dbg }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
