@@ -52,13 +52,15 @@ export function WaterfallChart({ data }: WaterfallChartProps) {
     let running = 0
     return data.map((item): TransformedItem => {
       if (item.isTotal) {
+        const anchor =
+          typeof item.value === 'number' && !Number.isNaN(item.value) ? item.value : running
         const result: TransformedItem = {
           name: item.name,
           invisible: 0,
           positive: 0,
           negative: 0,
-          total: running,
-          rawValue: running,
+          total: anchor,
+          rawValue: anchor,
           isTotal: true,
         }
         return result

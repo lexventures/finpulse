@@ -9,27 +9,24 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
 
-interface ForecastWeek {
+/** Weekly forecast row: grouped inflow/outflow bars (left axis) + balance lines (right axis). */
+export interface ForecastChartWeek {
   label: string
-  grossInflow: number
-  openingBalance: number
-  cashInflows: number
-  operatingOutflows: number
-  poPayments: number
-  taxReserves: number
-  projectedBalance: number
+  weeklyInflow: number
+  weeklyOutflow: number
+  startingBalance: number
+  projectedEndingCash: number
 }
 
 interface ForecastComboChartProps {
-  data: ForecastWeek[]
+  data: ForecastChartWeek[]
 }
 
 const fmtK = (v: number) => '$' + Math.round(v / 1000) + 'k'
-const fmtFull = (v: number) => '$' + v.toLocaleString()
+const fmtFull = (v: number) => '$' + Math.round(v).toLocaleString()
 
 function ForecastTooltip({ active, payload, label }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
@@ -55,41 +52,47 @@ function ForecastTooltip({ active, payload, label }: Record<string, unknown>) {
 export function ForecastComboChart({ data }: ForecastComboChartProps) {
   return (
     <ResponsiveContainer width="100%" height={350}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
+      <ComposedChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
-        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-        <YAxis tickFormatter={fmtK} tick={{ fontSize: 12 }} />
+        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+        <YAxis
+          yAxisId="flow"
+          tickFormatter={fmtK}
+          tick={{ fontSize: 11 }}
+          width={56}
+          label={{ value: 'Weekly $', angle: -90, position: 'insideLeft', fontSize: 10 }}
+        />
+        <YAxis
+          yAxisId="bal"
+          orientation="right"
+          tickFormatter={fmtK}
+          tick={{ fontSize: 11 }}
+          width={56}
+          label={{ value: 'Balance $', angle: 90, position: 'insideRight', fontSize: 10 }}
+        />
         <Tooltip content={<ForecastTooltip />} />
         <Legend verticalAlign="top" height={36} />
-        <ReferenceLine y={0} stroke="#9ca3af" strokeDasharray="4 4" label="Break-even" />
 
-        <Bar dataKey="cashInflows" stackId="stack" fill="#22c55e" name="Cash Inflows" />
-        <Bar dataKey="operatingOutflows" stackId="stack" fill="#ef4444" name="Operating Outflows" />
-        <Bar dataKey="poPayments" stackId="stack" fill="#f97316" name="PO Payments" />
-        <Bar dataKey="taxReserves" stackId="stack" fill="#eab308" name="Tax Reserves" />
+        <Bar yAxisId="flow" dataKey="weeklyInflow" fill="#22c55e" name="Weekly inflows" />
+        <Bar yAxisId="flow" dataKey="weeklyOutflow" fill="#ef4444" name="Weekly outflows" />
 
         <Line
+          yAxisId="bal"
           type="monotone"
-          dataKey="grossInflow"
-          stroke="#3b82f6"
-          strokeDasharray="6 3"
+          dataKey="startingBalance"
+          stroke="#64748b"
+          strokeDasharray="5 3"
           dot={false}
-          name="Gross Inflow"
+          name="Week start balance"
         />
         <Line
+          yAxisId="bal"
           type="monotone"
-          dataKey="openingBalance"
-          stroke="#1e293b"
-          dot={false}
-          name="Opening Balance"
-        />
-        <Line
-          type="monotone"
-          dataKey="projectedBalance"
+          dataKey="projectedEndingCash"
           stroke="#14b8a6"
           strokeWidth={2}
-          dot={false}
-          name="Projected Balance"
+          dot={{ r: 3, fill: '#14b8a6' }}
+          name="Week end balance"
         />
       </ComposedChart>
     </ResponsiveContainer>

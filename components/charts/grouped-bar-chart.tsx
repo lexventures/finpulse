@@ -67,7 +67,7 @@ function RetentionLabel(props: Record<string, unknown>) {
       textAnchor="middle"
       className="fill-muted-foreground text-[11px]"
     >
-      {value}%
+      {Number(value).toFixed(1)}%
     </text>
   )
 }

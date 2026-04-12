@@ -54,6 +54,10 @@ interface PnlRow {
   shipping_fulfillment: number
   ga_expense: number
   sm_expense: number
+  interest_financing: number
+  contribution_margin: number
+  allocated_ad_spend: number
+  allocated_email_marketing: number
   is_partial: boolean
 }
 
@@ -72,6 +76,16 @@ interface CfRow {
   sales_tax_payments: number | null
   inventory_purchases: number | null
   ending_cash: number | null
+}
+
+interface ForecastDbRow {
+  forecast_run_date: string
+  week_number: number
+  week_start: string
+  starting_cash: number
+  projected_inflows: number
+  projected_outflows: number
+  projected_ending_cash: number
 }
 
 interface ApRow {
@@ -97,13 +111,51 @@ interface ShopifyDaily {
   incoming_inventory_value: number
 }
 
+function formatWeekLabel(weekNum: number, weekStart: string): string {
+  const d = new Date(weekStart + 'T12:00:00Z')
+  if (Number.isNaN(d.getTime())) return `Wk ${weekNum}`
+  return `Wk ${weekNum} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+function buildFallbackForecast(params: {
+  startingCash: number
+  weeklyInflow: number
+  weeklyTotalOutflow: number
+}): Array<{
+  label: string
+  weeklyInflow: number
+  weeklyOutflow: number
+  startingBalance: number
+  projectedEndingCash: number
+}> {
+  const { startingCash, weeklyInflow, weeklyTotalOutflow } = params
+  const now = new Date()
+  let balance = startingCash
+  return Array.from({ length: 13 }, (_, i) => {
+    const weekNum = i + 1
+    const weekStart = new Date(now.getTime() + i * 7 * 86_400_000)
+    const label = `Wk ${weekNum} ${weekStart.getMonth() + 1}/${weekStart.getDate()}`
+    const startBal = balance
+    balance = startBal + weeklyInflow - weeklyTotalOutflow
+    return {
+      label,
+      weeklyInflow: Math.round(weeklyInflow),
+      weeklyOutflow: Math.round(weeklyTotalOutflow),
+      startingBalance: Math.round(startBal),
+      projectedEndingCash: Math.round(balance),
+    }
+  })
+}
+
 export default async function DashboardPage() {
   const supabase = createServiceClient()
 
-  const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes] = await Promise.all([
+  const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes, fcAllRes] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
-      .select('month, channel, gross_revenue, net_revenue, returns, discounts, selling_fees, processing_fees, shipping_income, other_income_expenses, cogs, total_opex, payroll, shipping_fulfillment, ga_expense, sm_expense, is_partial')
+      .select(
+        'month, channel, gross_revenue, net_revenue, returns, discounts, selling_fees, processing_fees, shipping_income, other_income_expenses, cogs, total_opex, payroll, shipping_fulfillment, ga_expense, sm_expense, interest_financing, contribution_margin, allocated_ad_spend, allocated_email_marketing, is_partial',
+      )
       .order('month', { ascending: false })
       .limit(200),
     supabase
@@ -116,19 +168,21 @@ export default async function DashboardPage() {
       .select('month, net_cash_flow, sales_tax_payments, inventory_purchases, ending_cash')
       .order('month', { ascending: false })
       .limit(24),
-    supabase
-      .from('fin_ap_aging')
-      .select('*')
-      .order('amount', { ascending: true }),
-    supabase
-      .from('fin_ar_aging')
-      .select('*')
-      .order('amount', { ascending: true }),
+    supabase.from('fin_ap_aging').select('*').order('amount', { ascending: false }),
+    supabase.from('fin_ar_aging').select('*').order('amount', { ascending: false }),
     supabase
       .from('fin_shopify_daily')
       .select('incoming_inventory_value')
       .order('date', { ascending: false })
       .limit(1),
+    supabase
+      .from('fin_cash_forecast')
+      .select(
+        'forecast_run_date, week_number, week_start, starting_cash, projected_inflows, projected_outflows, projected_ending_cash',
+      )
+      .order('forecast_run_date', { ascending: false })
+      .order('week_number', { ascending: true })
+      .limit(260),
   ])
 
   const pnl = (pnlRes.data ?? []) as PnlRow[]
@@ -137,20 +191,34 @@ export default async function DashboardPage() {
   const apAging = (apRes.data ?? []) as ApRow[]
   const arAging = (arRes.data ?? []) as ArRow[]
   const shopifyDaily = (sdRes.data ?? [])[0] as ShopifyDaily | undefined
+  const fcAll = (fcAllRes.data ?? []) as ForecastDbRow[]
 
-  // ---- KPI HEADER CALCULATIONS ----
+  const latestFcDate = fcAll[0]?.forecast_run_date
+  const fcWeeks = latestFcDate
+    ? fcAll.filter((r) => r.forecast_run_date === latestFcDate).slice(0, 13)
+    : []
+  const forecastFromPipeline = fcWeeks.length === 13
+
   const latestBs = bs[0]
   const cashPosition = latestBs?.cash_and_equivalents ?? 0
+  const cashFromCf = cf[0]?.ending_cash
+  const startingCashForDisplay =
+    typeof cashFromCf === 'number' && !Number.isNaN(cashFromCf) && cashFromCf !== 0
+      ? cashFromCf
+      : cashPosition
 
   const companyPnl = pnl.filter((r) => r.channel === 'company' && !r.is_partial)
   const latestCompanyPnl = companyPnl[0]
 
-  // Compute monthly burn from P&L: COGS + all opex categories + other expenses
-  // total_opex may be near-zero if section parsing missed items, so compute from raw fields
   const trailing3Pnl = companyPnl.slice(0, 3)
 
   function monthlyBurn(r: PnlRow): number {
-    return Math.abs(r.cogs) + Math.abs(r.total_opex) + Math.abs(r.other_income_expenses)
+    return (
+      Math.abs(r.cogs) +
+      Math.abs(r.total_opex) +
+      Math.abs(r.other_income_expenses) +
+      Math.abs(r.interest_financing ?? 0)
+    )
   }
 
   const avgMonthlyBurn = trailing3Pnl.length > 0
@@ -161,86 +229,100 @@ export default async function DashboardPage() {
 
   const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
 
-  const grossToNetPct = latestCompanyPnl && latestCompanyPnl.gross_revenue > 0
-    ? (latestCompanyPnl.net_revenue / latestCompanyPnl.gross_revenue) * 100
-    : 0
+  const netSalesOfGrossPct =
+    latestCompanyPnl && latestCompanyPnl.gross_revenue > 0
+      ? (latestCompanyPnl.net_revenue / latestCompanyPnl.gross_revenue) * 100
+      : 0
 
-  // ---- 13-WEEK CASH FLOW FORECAST ----
   const avgRevenue = trailing3Pnl.length > 0
     ? trailing3Pnl.reduce((s, r) => s + r.net_revenue, 0) / trailing3Pnl.length
     : 0
 
-  // Use cash flow data if available; derive from balance sheet changes when CF fields are null
   const trailing3Cf = cf.slice(0, 3)
   const cfTaxSum = trailing3Cf.reduce((s, r) => s + Math.abs(r.sales_tax_payments ?? 0), 0)
 
-  // If CF has no tax data, estimate from BS tax liability change (growth = accruing taxes)
-  let avgTax: number
+  let avgTaxMonthly: number
   if (cfTaxSum > 0) {
-    avgTax = cfTaxSum / trailing3Cf.length
+    avgTaxMonthly = cfTaxSum / trailing3Cf.length
   } else if (bs.length >= 2) {
     const taxDeltas: number[] = []
     for (let i = 0; i < Math.min(3, bs.length - 1); i++) {
-      const delta = Math.abs((bs[i].sales_tax_liability ?? 0) - (bs[i + 1]?.sales_tax_liability ?? 0))
-      taxDeltas.push(delta)
+      const delta = (bs[i].sales_tax_liability ?? 0) - (bs[i + 1]?.sales_tax_liability ?? 0)
+      taxDeltas.push(Math.abs(delta))
     }
-    avgTax = taxDeltas.length > 0 ? taxDeltas.reduce((a, b) => a + b, 0) / taxDeltas.length : 0
+    avgTaxMonthly = taxDeltas.length > 0 ? taxDeltas.reduce((a, b) => a + b, 0) / taxDeltas.length : 0
   } else {
-    avgTax = 0
+    avgTaxMonthly = 0
   }
 
-  const cfInvSum = trailing3Cf.reduce((s, r) => s + Math.abs(r.inventory_purchases ?? 0), 0)
-  const avgInventoryPurchases = trailing3Cf.length > 0 ? cfInvSum / trailing3Cf.length : 0
+  const cfInvAvg =
+    trailing3Cf.length > 0
+      ? trailing3Cf.reduce((s, r) => s + Math.abs(r.inventory_purchases ?? 0), 0) / trailing3Cf.length
+      : 0
 
-  // Separate burn into components for the forecast chart stacked bars.
-  // COGS is already in monthlyBurn; break out PO payments (from CF) and tax as separate components.
-  // Operating burn = total burn minus COGS (COGS is the inventory/PO component).
   const avgCogs = trailing3Pnl.length > 0
     ? trailing3Pnl.reduce((s, r) => s + Math.abs(r.cogs), 0) / trailing3Pnl.length
     : 0
-  const avgOperatingBurn = avgMonthlyBurn - avgCogs
-
+  const avgOperatingBurn = Math.max(0, avgMonthlyBurn - avgCogs)
   const weeklyInflow = avgRevenue / WEEKS_PER_MONTH
   const weeklyOperating = avgOperatingBurn / WEEKS_PER_MONTH
   const weeklyCogs = avgCogs / WEEKS_PER_MONTH
-  const weeklyTax = avgTax / WEEKS_PER_MONTH
-  const weeklyTotalOutflow = weeklyOperating + weeklyCogs + weeklyTax
+  const weeklyTax = avgTaxMonthly / WEEKS_PER_MONTH
+  const weeklyInventoryCf = cfInvAvg / WEEKS_PER_MONTH
+  const weeklyPoShopify = (shopifyDaily?.incoming_inventory_value ?? 0) / 13
+  const weeklyTotalOutflowFallback =
+    weeklyOperating + weeklyCogs + weeklyTax + weeklyInventoryCf + weeklyPoShopify
 
-  const startingCash = cashPosition
-  const forecastData = Array.from({ length: 13 }, (_, i) => {
-    const weekNum = i + 1
-    const now = new Date()
-    const weekStart = new Date(now.getTime() + i * 7 * 86_400_000)
-    const label = `Wk ${weekNum} ${(weekStart.getMonth() + 1)}/${weekStart.getDate()}`
-    const cumInflows = weeklyInflow * weekNum
-    const cumOutflows = weeklyTotalOutflow * weekNum
-    const projectedBalance = startingCash + cumInflows - cumOutflows
-    return {
-      label,
-      grossInflow: Math.round(weeklyInflow),
-      openingBalance: Math.round(i === 0 ? startingCash : startingCash + weeklyInflow * i - weeklyTotalOutflow * i),
-      cashInflows: Math.round(weeklyInflow),
-      operatingOutflows: Math.round(weeklyOperating),
-      poPayments: Math.round(weeklyCogs),
-      taxReserves: Math.round(weeklyTax),
-      projectedBalance: Math.round(projectedBalance),
-    }
-  })
+  let forecastData: Array<{
+    label: string
+    weeklyInflow: number
+    weeklyOutflow: number
+    startingBalance: number
+    projectedEndingCash: number
+  }>
 
-  // ---- GROSS-TO-NET REVENUE BRIDGE ----
-  const bridgeData = latestCompanyPnl ? [
-    { name: 'Gross Revenue', value: latestCompanyPnl.gross_revenue },
-    { name: 'Returns', value: -(Math.abs(latestCompanyPnl.returns)) },
-    { name: 'Discounts', value: -(Math.abs(latestCompanyPnl.discounts)) },
-    { name: 'Faire Fees', value: -(Math.abs(latestCompanyPnl.selling_fees)) },
-    { name: 'Shopify Fees', value: -(Math.abs(latestCompanyPnl.processing_fees) * 0.4) },
-    { name: 'Payment Processing', value: -(Math.abs(latestCompanyPnl.processing_fees) * 0.6) },
-    { name: 'Adjustments', value: latestCompanyPnl.other_income_expenses },
-    { name: 'Shipping Revenue', value: Math.abs(latestCompanyPnl.shipping_income) },
-    { name: 'Net Revenue', value: latestCompanyPnl.net_revenue, isTotal: true },
-  ] : []
+  if (forecastFromPipeline) {
+    forecastData = fcWeeks.map((w) => ({
+      label: formatWeekLabel(w.week_number, w.week_start),
+      weeklyInflow: Math.round(Number(w.projected_inflows) || 0),
+      weeklyOutflow: Math.round(Number(w.projected_outflows) || 0),
+      startingBalance: Math.round(Number(w.starting_cash) || 0),
+      projectedEndingCash: Math.round(Number(w.projected_ending_cash) || 0),
+    }))
+  } else {
+    forecastData = buildFallbackForecast({
+      startingCash: startingCashForDisplay,
+      weeklyInflow,
+      weeklyTotalOutflow: weeklyTotalOutflowFallback,
+    })
+  }
 
-  // ---- REVENUE LEAKAGE BY CHANNEL ----
+  const netSalesBridge = latestCompanyPnl
+    ? [
+        { name: 'Gross revenue', value: latestCompanyPnl.gross_revenue },
+        { name: 'Returns', value: latestCompanyPnl.returns },
+        { name: 'Discounts', value: latestCompanyPnl.discounts },
+        { name: 'Shipping income', value: latestCompanyPnl.shipping_income },
+        { name: 'Net revenue', value: latestCompanyPnl.net_revenue, isTotal: true },
+      ]
+    : []
+
+  const contributionBridge = latestCompanyPnl
+    ? [
+        { name: 'Net revenue', value: latestCompanyPnl.net_revenue },
+        { name: 'COGS', value: latestCompanyPnl.cogs },
+        { name: 'Processing fees', value: latestCompanyPnl.processing_fees },
+        { name: 'Selling fees', value: latestCompanyPnl.selling_fees },
+        { name: 'Paid ads', value: latestCompanyPnl.allocated_ad_spend },
+        { name: 'Email marketing', value: latestCompanyPnl.allocated_email_marketing },
+        {
+          name: 'Contribution margin',
+          value: latestCompanyPnl.contribution_margin,
+          isTotal: true,
+        },
+      ]
+    : []
+
   const channelNames: Record<string, string> = {
     dtc: 'Shopify DTC',
     wholesale_faire: 'Faire Wholesale',
@@ -260,7 +342,6 @@ export default async function DashboardPage() {
     retentionPct: r.gross_revenue > 0 ? (r.net_revenue / r.gross_revenue) * 100 : 0,
   }))
 
-  // ---- GROSS-TO-NET TREND (MONTHLY) ----
   const trendMonths = companyPnl.slice(0, 12).reverse()
   const trendData = trendMonths.map((r) => ({
     month: new Date(r.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
@@ -268,27 +349,22 @@ export default async function DashboardPage() {
     totalLeakage: r.gross_revenue - r.net_revenue,
   }))
 
-  // ---- MONTHLY BURN RATE TREND ----
   const burnMonths = companyPnl.slice(0, 12).reverse()
   const burnData = burnMonths.map((r) => ({
     month: new Date(r.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short' }),
     amount: monthlyBurn(r),
   }))
 
-  // ---- RUNWAY PROJECTION ----
-  const latestBurn = burnData.length > 0 ? burnData[burnData.length - 1].amount : 0
   const runwayData = Array.from({ length: 12 }, (_, i) => {
     const d = new Date()
     d.setMonth(d.getMonth() + i)
     return {
       month: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-      balance: Math.max(0, cashPosition - latestBurn * i),
+      balance: Math.max(0, cashPosition - avgMonthlyBurn * i),
     }
   })
-  // Danger zone: 2 months of burn as minimum safe cash balance
-  const dangerThreshold = latestBurn * 2
+  const dangerThreshold = avgMonthlyBurn * 2
 
-  // ---- AP AGING BUCKETS ----
   const now = new Date()
   const apBuckets = new Map<string, number>()
   for (const item of apAging) {
@@ -301,7 +377,6 @@ export default async function DashboardPage() {
     amount: apBuckets.get(bucket) ?? 0,
   }))
 
-  // ---- AR AGING BUCKETS ----
   const arBuckets = new Map<string, number>()
   const totalArOutstanding = arAging.reduce((s, r) => s + Math.abs(r.amount), 0)
   for (const item of arAging) {
@@ -314,22 +389,23 @@ export default async function DashboardPage() {
     amount: arBuckets.get(bucket) ?? 0,
   }))
 
-  // ---- CASH POSITION SUMMARY ----
-  const lowestForecast = Math.min(...forecastData.map((w) => w.projectedBalance))
+  const lowestForecast = Math.min(...forecastData.map((w) => w.projectedEndingCash))
   const netTaxReserve = weeklyTax * 13
+  const forecastSourceNote = forecastFromPipeline
+    ? `Forecast uses the latest run-cash-forecast pipeline (${latestFcDate}).`
+    : 'Forecast is estimated from trailing P&amp;L and cash flow (run a Finaloop sync to refresh fin_cash_forecast).'
 
   const summaryHealthy = lowestForecast > 0 && runwayWeeks > 8
   const summaryColor = summaryHealthy ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header Bar */}
       <div className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold tracking-tight text-gray-800">Financial Health Dashboard</h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              13-Week Cash Flow &middot; Gross-to-Net Bridge &middot; AP/AR Aging &middot; Burn Rate &middot; Runway &middot; Tax Reserve
+              13-Week Cash Flow &middot; Net sales &amp; contribution bridges &middot; AP/AR &middot; Burn &amp; runway
             </p>
           </div>
           <Link
@@ -343,90 +419,145 @@ export default async function DashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Section 1: KPI Header Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          <KpiCard label="CASH POSITION" value={fmtFull(cashPosition)} sub="Current bank balance" color="blue" />
-          <KpiCard label="WEEKLY BURN RATE" value={`${fmtFull(weeklyBurnRate)}/wk`} sub="COGS + opex + other (trailing 3 mo avg)" color="red" />
-          <KpiCard label="RUNWAY" value={`${runwayWeeks} weeks`} sub={`Weeks until cash = $0`} color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'} />
-          <KpiCard label="TOTAL AP OUTSTANDING" value={fmtFull(totalApOutstanding)} sub="Vendor bills + open POs" color="orange" />
-          <KpiCard label="GROSS-TO-NET" value={fmtPct(grossToNetPct)} sub="Revenue retention ratio" color="blue" />
+          <KpiCard
+            label="CASH POSITION"
+            value={fmtFull(cashPosition)}
+            sub="Balance sheet cash &amp; equivalents (latest month)"
+            color="blue"
+          />
+          <KpiCard
+            label="WEEKLY BURN RATE"
+            value={`${fmtFull(weeklyBurnRate)}/wk`}
+            sub="COGS + opex + other + interest (trailing 3 mo avg)"
+            color="red"
+          />
+          <KpiCard
+            label="RUNWAY"
+            value={`${runwayWeeks} weeks`}
+            sub="At trailing avg burn, no new revenue"
+            color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'}
+          />
+          <KpiCard
+            label="TOTAL AP OUTSTANDING"
+            value={fmtFull(totalApOutstanding)}
+            sub="Shopify incoming POs (DTC sync)"
+            color="orange"
+          />
+          <KpiCard
+            label="NET SALES % OF GROSS"
+            value={fmtPct(netSalesOfGrossPct)}
+            sub="net revenue ÷ gross (Finaloop P&amp;L)"
+            color="blue"
+          />
         </div>
 
-        {/* Section 2: 13-Week Cash Flow Forecast */}
         <Card>
           <CardHeader>
             <CardTitle>13-Week Cash Flow Forecast</CardTitle>
-            <CardDescription>Projected weekly cash inflows, outflows, and running balance. Cash-at-risk line = break-even ($0).</CardDescription>
+            <CardDescription>
+              Weekly inflows vs outflows (left scale) and projected cash balance (right scale).{' '}
+              {forecastFromPipeline
+                ? 'Data from the latest run-cash-forecast job.'
+                : 'Estimated from trailing net revenue and expenses until a forecast run exists.'}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ForecastComboChart data={forecastData} />
           </CardContent>
         </Card>
 
-        {/* Section 3: Gross-to-Net Revenue Bridge */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Gross-to-Net Revenue Bridge &mdash; Last Completed Month</CardTitle>
-            <CardDescription>Where your top-line revenue goes before it hits the bank. Each bar shows what&apos;s subtracted from gross sales to arrive at net cash collected.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {bridgeData.length > 0 ? (
-              <WaterfallChart data={bridgeData} />
-            ) : (
-              <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data available. Run a Finaloop sync from Settings.</p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Section 4 & 5: Revenue Leakage + Gross-to-Net Trend */}
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Revenue Leakage by Channel</CardTitle>
-              <CardDescription>Gross-to-net retention rate per channel &mdash; what % of gross revenue you actually keep.</CardDescription>
+              <CardTitle>Net sales bridge &mdash; last completed month</CardTitle>
+              <CardDescription>
+                Gross revenue through returns, discounts, and shipping to{' '}
+                <strong>net revenue</strong> (same definition as Finaloop sync).
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {leakageData.length > 0 ? (
-                <GroupedBarChart data={leakageData} />
+              {netSalesBridge.length > 0 ? (
+                <WaterfallChart data={netSalesBridge} />
               ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center">No channel data available.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data. Run a Finaloop sync.</p>
               )}
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Gross-to-Net Trend (Monthly)</CardTitle>
-              <CardDescription>Net retention % over time &mdash; are you keeping more or less of each dollar?</CardDescription>
+              <CardTitle>Contribution margin bridge &mdash; last completed month</CardTitle>
+              <CardDescription>
+                From net revenue through COGS, fees, and allocated marketing to{' '}
+                <strong>contribution margin</strong> (Finaloop P&amp;L columns).
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {trendData.length > 0 ? (
-                <DualAxisLineChart data={trendData} />
+              {contributionBridge.length > 0 ? (
+                <WaterfallChart data={contributionBridge} />
               ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center">No trend data available.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data. Run a Finaloop sync.</p>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Section 6 & 7: Burn Rate + Runway */}
         <div className="grid md:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Monthly Burn Rate Trend</CardTitle>
-              <CardDescription>Total monthly spend: COGS + operating expenses + other expenses from the P&amp;L.</CardDescription>
+              <CardTitle>Net sales by channel</CardTitle>
+              <CardDescription>
+                Gross vs net revenue per channel for the latest completed month. Net here is Finaloop{' '}
+                <strong>net revenue</strong> (not after payment processor fees).
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {burnData.length > 0 ? (
-                <BurnRateChart data={burnData} />
+              {leakageData.length > 0 ? (
+                <GroupedBarChart data={leakageData} />
               ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center">No burn data available.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No channel data.</p>
               )}
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Runway Projection</CardTitle>
-              <CardDescription>Months of runway remaining at current burn rate.</CardDescription>
+              <CardTitle>Net sales % trend (monthly)</CardTitle>
+              <CardDescription>
+                Net revenue ÷ gross revenue (company). &ldquo;Gap&rdquo; is gross minus net sales, not fees.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {trendData.length > 0 ? (
+                <DualAxisLineChart data={trendData} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No trend data.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly burn trend</CardTitle>
+              <CardDescription>
+                COGS + operating expenses + other + interest (company P&amp;L), trailing months.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {burnData.length > 0 ? (
+                <BurnRateChart data={burnData} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-8 text-center">No burn data.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Runway projection</CardTitle>
+              <CardDescription>
+                Cash if trailing average monthly burn continues (no new revenue). Matches runway KPI.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {runwayData.length > 0 ? (
@@ -438,7 +569,6 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* Section 8 & 9: AP Aging + AR Aging Tables */}
         <div className="grid md:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
@@ -460,21 +590,28 @@ export default async function DashboardPage() {
                       const days = daysBetween(item.created_at, now)
                       return (
                         <TableRow key={item.id}>
-                          <TableCell className="font-medium text-xs">{item.vendor}{item.po_reference ? ` (${item.po_reference})` : ''}</TableCell>
+                          <TableCell className="font-medium text-xs">
+                            {item.vendor}
+                            {item.po_reference ? ` (${item.po_reference})` : ''}
+                          </TableCell>
                           <TableCell className="text-xs">{item.item_type}</TableCell>
-                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>{days} days</TableCell>
+                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>
+                            {days} days
+                          </TableCell>
                           <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
                         </TableRow>
                       )
                     })}
                     <TableRow className="bg-muted/50 font-semibold">
-                      <TableCell colSpan={3} className="text-xs">Total AP Outstanding</TableCell>
+                      <TableCell colSpan={3} className="text-xs">
+                        Total AP Outstanding
+                      </TableCell>
                       <TableCell className="text-right text-xs">{fmtFull(totalApOutstanding)}</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
               ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AP aging data. Run a Shopify DTC sync.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AP aging. Run Shopify DTC sync.</p>
               )}
             </CardContent>
           </Card>
@@ -499,27 +636,33 @@ export default async function DashboardPage() {
                       const days = daysBetween(item.order_date, now)
                       return (
                         <TableRow key={item.id}>
-                          <TableCell className="font-medium text-xs">{item.customer_name}{item.channel ? ` (${item.channel})` : ''}</TableCell>
+                          <TableCell className="font-medium text-xs">
+                            {item.customer_name}
+                            {item.channel ? ` (${item.channel})` : ''}
+                          </TableCell>
                           <TableCell className="text-xs">{item.terms}</TableCell>
-                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>{days} days</TableCell>
+                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>
+                            {days} days
+                          </TableCell>
                           <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
                         </TableRow>
                       )
                     })}
                     <TableRow className="bg-muted/50 font-semibold">
-                      <TableCell colSpan={3} className="text-xs">Total AR Outstanding</TableCell>
+                      <TableCell colSpan={3} className="text-xs">
+                        Total AR Outstanding
+                      </TableCell>
                       <TableCell className="text-right text-xs">{fmtFull(totalArOutstanding)}</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
               ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AR aging data. Run a Shopify Wholesale sync.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AR aging. Run Shopify Wholesale sync.</p>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Section 10 & 11: AP/AR Aging Bucket Charts */}
         <div className="grid md:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
@@ -541,17 +684,16 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* Section 12: Cash Position Summary */}
         <div className={`rounded-xl border p-6 ${summaryColor}`}>
-          <h3 className="font-bold text-base mb-2">Cash Position Summary</h3>
+          <h3 className="font-bold text-base mb-2">Cash position summary</h3>
           <p className="text-sm leading-relaxed">
-            Cash remains {summaryHealthy ? 'positive' : 'at risk'} through the 13-week window.
-            Lowest projected balance is {fmtFull(lowestForecast)} (Week {forecastData.findIndex((w) => w.projectedBalance === lowestForecast) + 1}).
-            Total AP outstanding is {fmtFull(totalApOutstanding)} against AR of {fmtFull(totalArOutstanding)}, leaving a net
-            payables gap of {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}.
-            Tax reserve accruing at {fmtFull(netTaxReserve)} over 13 weeks at {fmtFull(weeklyTax)}/wk effective rate.
-            Weekly burn of {fmtFull(weeklyBurnRate)} gives {runwayWeeks} weeks of runway from today&apos;s cash position.
-            {runwayWeeks < 12 ? ' Watch Weeks 9\u201311 \u2014 proactive collections or PO deferral recommended.' : ''}
+            {forecastSourceNote} Lowest projected week-end balance is {fmtFull(lowestForecast)} (week{' '}
+            {forecastData.findIndex((w) => w.projectedEndingCash === lowestForecast) + 1}). Total AP outstanding is{' '}
+            {fmtFull(totalApOutstanding)} against AR of {fmtFull(totalArOutstanding)}, net payables gap{' '}
+            {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}. Tax-related estimate (13 weeks):{' '}
+            {fmtFull(netTaxReserve)} at ~{fmtFull(weeklyTax)}/wk when cash flow tax lines are empty (else from Finaloop cash flow).
+            Weekly burn {fmtFull(weeklyBurnRate)} implies ~{runwayWeeks} weeks runway at current balance if burn and no inflows
+            continue. {runwayWeeks < 12 ? 'Review collections and payables timing.' : ''}
           </p>
         </div>
       </div>

@@ -23,7 +23,7 @@ interface DualAxisLineChartProps {
 }
 
 const fmtK = (v: number) => '$' + Math.round(v / 1000) + 'k'
-const fmtPct = (v: number) => v + '%'
+const fmtPct = (v: number) => (typeof v === 'number' ? v.toFixed(1) : String(v)) + '%'
 const fmtFull = (v: number) => '$' + v.toLocaleString()
 
 function DualAxisTooltip({ active, payload, label }: Record<string, unknown>) {
