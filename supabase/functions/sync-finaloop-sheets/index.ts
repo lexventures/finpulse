@@ -375,11 +375,26 @@ function parseMonthCell(cell: string): { month: string; isPartial: boolean } | n
   if (!cell || typeof cell !== 'string') return null
   const isPartial = /\(partial\)/i.test(cell)
   const cleaned = cell.replace(/\(partial\)/i, '').trim()
-  const m = cleaned.match(/^(\w+)\s+(\d{4})$/)
-  if (!m) return null
-  const num = MONTH_ABBREVS[m[1].toLowerCase()]
-  if (!num) return null
-  return { month: `${m[2]}-${num}-01`, isPartial }
+
+  // Format 1: "January 2026" or "Jan 2026"
+  const m1 = cleaned.match(/^(\w+)\s+(\d{4})$/)
+  if (m1) {
+    const num = MONTH_ABBREVS[m1[1].toLowerCase()]
+    if (num) return { month: `${m1[2]}-${num}-01`, isPartial }
+  }
+
+  // Format 2: "Jan 31, 2026" or "January 12, 2026"
+  const m2 = cleaned.match(/^(\w+)\s+\d{1,2},?\s+(\d{4})$/)
+  if (m2) {
+    const num = MONTH_ABBREVS[m2[1].toLowerCase()]
+    if (num) return { month: `${m2[2]}-${num}-01`, isPartial }
+  }
+
+  // Format 3: "2026-01-31" ISO date
+  const m3 = cleaned.match(/^(\d{4})-(\d{2})-\d{2}$/)
+  if (m3) return { month: `${m3[1]}-${m3[2]}-01`, isPartial }
+
+  return null
 }
 
 function detectMonthRow(rows: string[][]): { rowIndex: number; months: MonthMeta[] } {
@@ -392,7 +407,10 @@ function detectMonthRow(rows: string[][]): { rowIndex: number; months: MonthMeta
     }
     if (months.length >= 2) return { rowIndex: r, months }
   }
-  throw new Error('Could not find month headers in the first 10 rows of the P&L sheet')
+  const sampleRows = rows.slice(0, 10).map((r, i) =>
+    `Row ${i}: [${r.slice(0, 6).map((c: unknown) => JSON.stringify(c)).join(', ')}]`
+  ).join('; ')
+  throw new Error(`Could not find month headers in the first 10 rows. Sample: ${sampleRows}`)
 }
 
 // ---------------------------------------------------------------------------
