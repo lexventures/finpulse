@@ -34,18 +34,11 @@ function compactTick(value: number): string {
   return `${sign}$${Math.round(abs)}`
 }
 
-function barColor(cash: number): string {
-  if (cash < 0) return 'hsl(0 72% 51%)'
-  if (cash < 50_000) return 'hsl(48 96% 53%)'
-  if (cash < 200_000) return 'hsl(48 96% 63%)'
-  return 'hsl(var(--chart-1))'
-}
-
 const config: ChartConfig = {
   cash: { label: 'Projected Cash', color: 'hsl(var(--chart-1))' },
 }
 
-function CustomTooltip({ active, payload, label }: {
+function TooltipContent({ active, payload, label }: {
   active?: boolean
   payload?: Array<{ value: number }>
   label?: string
@@ -56,12 +49,6 @@ function CustomTooltip({ active, payload, label }: {
     <div className="rounded-lg border bg-background px-3 py-2 shadow-md">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-sm font-semibold">{compactTick(val)}</p>
-      {val < 50_000 && val >= 0 && (
-        <p className="text-xs font-medium text-amber-600">Low cash warning</p>
-      )}
-      {val < 0 && (
-        <p className="text-xs font-medium text-red-600">Cash negative</p>
-      )}
     </div>
   )
 }
@@ -75,45 +62,45 @@ export function CashRunwayChart({ data }: CashRunwayChartProps) {
     )
   }
 
-  const minCash = Math.min(...data.map((d) => d.cash))
   const startCash = data[0]?.cash ?? 0
   const endCash = data[data.length - 1]?.cash ?? 0
+  const minCash = Math.min(...data.map((d) => d.cash))
+  const maxCash = Math.max(...data.map((d) => d.cash))
   const burnRate = data.length > 1 ? (startCash - endCash) / (data.length - 1) : 0
-  const weeksUntilZero = burnRate > 0 ? Math.ceil(endCash / burnRate) : null
+  const changePct = startCash > 0 ? ((endCash - startCash) / startCash) * 100 : 0
+
+  const dangerThreshold = startCash * 0.25
+
+  function barFill(cash: number): string {
+    if (cash < 0) return 'hsl(0 72% 51%)'
+    if (cash < dangerThreshold) return 'hsl(48 96% 53%)'
+    const ratio = maxCash > minCash ? (cash - minCash) / (maxCash - minCash) : 1
+    const lightness = 45 + ratio * 15
+    return `hsl(221 83% ${lightness}%)`
+  }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs">
-        <div className="flex items-center gap-4">
-          <span className="text-muted-foreground">
-            Start: <span className="font-medium text-foreground">{compactTick(startCash)}</span>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+        <span className="text-muted-foreground">
+          Start: <span className="font-semibold text-foreground">{compactTick(startCash)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          End: <span className="font-semibold text-foreground">{compactTick(endCash)}</span>
+        </span>
+        <span className={`font-semibold ${changePct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+          {changePct >= 0 ? '+' : ''}{changePct.toFixed(0)}%
+        </span>
+        {burnRate > 0 && (
+          <span className="ml-auto text-muted-foreground">
+            Burn: <span className="font-semibold text-red-600">{compactTick(burnRate)}/wk</span>
           </span>
-          <span className="text-muted-foreground">
-            End: <span className="font-medium text-foreground">{compactTick(endCash)}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-          {burnRate > 0 && (
-            <span className="text-muted-foreground">
-              Burn: <span className="font-medium text-red-600">{compactTick(burnRate)}/wk</span>
-            </span>
-          )}
-          {minCash < 0 && (
-            <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
-              Goes negative
-            </span>
-          )}
-          {minCash >= 0 && weeksUntilZero !== null && weeksUntilZero <= 26 && (
-            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-              ~{weeksUntilZero}wk runway
-            </span>
-          )}
-        </div>
+        )}
       </div>
 
       <ChartContainer config={config} className="h-[240px] w-full">
         <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted/50" />
           <XAxis
             dataKey="week"
             tickLine={false}
@@ -129,10 +116,10 @@ export function CashRunwayChart({ data }: CashRunwayChartProps) {
             width={52}
             tickFormatter={compactTick}
           />
-          <ChartTooltip content={<CustomTooltip />} />
-          <Bar dataKey="cash" radius={[3, 3, 0, 0]} maxBarSize={32}>
+          <ChartTooltip content={<TooltipContent />} />
+          <Bar dataKey="cash" radius={[3, 3, 0, 0]} maxBarSize={36}>
             {data.map((d, i) => (
-              <Cell key={i} fill={barColor(d.cash)} />
+              <Cell key={i} fill={barFill(d.cash)} />
             ))}
           </Bar>
         </BarChart>

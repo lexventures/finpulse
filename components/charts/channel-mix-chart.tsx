@@ -4,7 +4,7 @@ interface ChannelDatum {
   label: string
   value: number
   color: string
-  momPct: number | null
+  yoyPct: number | null
 }
 
 interface ChannelMixChartProps {
@@ -56,7 +56,7 @@ export function ChannelMixChart({ data, total }: ChannelMixChartProps) {
           const pct = ((ch.value / total) * 100).toFixed(0)
           const barWidth = maxVal > 0 ? (ch.value / maxVal) * 100 : 0
           return (
-            <div key={ch.label} className="group">
+            <div key={ch.label}>
               <div className="mb-1 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span
@@ -66,13 +66,13 @@ export function ChannelMixChart({ data, total }: ChannelMixChartProps) {
                   <span className="text-sm font-medium">{ch.label}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  {ch.momPct !== null && (
+                  {ch.yoyPct !== null && (
                     <span
                       className={`text-xs font-medium ${
-                        ch.momPct >= 0 ? 'text-emerald-600' : 'text-red-600'
+                        ch.yoyPct >= 0 ? 'text-emerald-600' : 'text-red-600'
                       }`}
                     >
-                      {ch.momPct >= 0 ? '+' : ''}{ch.momPct.toFixed(0)}%
+                      {ch.yoyPct >= 0 ? '+' : ''}{ch.yoyPct.toFixed(0)}% YoY
                     </span>
                   )}
                   <span className="min-w-[60px] text-right text-sm font-semibold tabular-nums">
@@ -96,6 +96,10 @@ export function ChannelMixChart({ data, total }: ChannelMixChartProps) {
           )
         })}
       </div>
+
+      <p className="text-right text-xs text-muted-foreground">
+        Total: <span className="font-medium text-foreground">{compactVal(total)}</span>
+      </p>
     </div>
   )
 }

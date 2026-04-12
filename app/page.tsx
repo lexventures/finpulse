@@ -495,15 +495,25 @@ export default async function CEOOverviewPage() {
   const WHOLESALE_KEYS_SET = new Set(['wholesale_faire', 'wholesale_direct', 'wholesale_key'])
 
   const DISPLAY_CHANNELS: Array<{ key: string; label: string; color: string }> = [
-    { key: 'dtc', label: 'DTC', color: 'hsl(var(--chart-1))' },
-    { key: 'wholesale', label: 'Wholesale', color: 'hsl(var(--chart-2))' },
-    { key: 'retail', label: 'Retail', color: 'hsl(var(--chart-5))' },
-    { key: 'marketplace', label: 'Marketplace', color: 'hsl(210 70% 55%)' },
+    { key: 'dtc', label: 'DTC', color: 'hsl(221 83% 53%)' },
+    { key: 'wholesale', label: 'Wholesale', color: 'hsl(262 83% 58%)' },
+    { key: 'retail', label: 'Retail', color: 'hsl(152 60% 42%)' },
+    { key: 'marketplace', label: 'Marketplace', color: 'hsl(30 95% 55%)' },
   ]
 
-  const latestChannelRevenues = new Map<string, number>()
-  const priorChannelRevenues = new Map<string, number>()
-  const priorMonthStr = pnl.length >= 2 ? String(pnl[1].month) : null
+  const lastCompletedMonth = completedMonths.length > 0 ? String(completedMonths[0].month) : null
+  const mixMonth = lastCompletedMonth ?? (latestMonth ? String(latestMonth) : null)
+  const mixMonthDate = mixMonth ? new Date(mixMonth + 'T00:00:00') : null
+  const mixPyMonth = mixMonthDate
+    ? (() => {
+        const d = new Date(mixMonthDate)
+        d.setFullYear(d.getFullYear() - 1)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+      })()
+    : null
+
+  const mixChannelRevenues = new Map<string, number>()
+  const mixPyChannelRevenues = new Map<string, number>()
 
   for (const row of channelPnl) {
     const m = String(row.month)
@@ -512,23 +522,30 @@ export default async function CEOOverviewPage() {
     const bucket = WHOLESALE_KEYS_SET.has(ch) ? 'wholesale' : ch === 'wholesale' ? null : ch
     if (!bucket) continue
 
-    if (m === latestMonth) {
-      latestChannelRevenues.set(bucket, (latestChannelRevenues.get(bucket) ?? 0) + rev)
-    } else if (m === priorMonthStr) {
-      priorChannelRevenues.set(bucket, (priorChannelRevenues.get(bucket) ?? 0) + rev)
+    if (m === mixMonth) {
+      mixChannelRevenues.set(bucket, (mixChannelRevenues.get(bucket) ?? 0) + rev)
+    } else if (m === mixPyMonth) {
+      mixPyChannelRevenues.set(bucket, (mixPyChannelRevenues.get(bucket) ?? 0) + rev)
     }
   }
 
-  const channelTotal = [...latestChannelRevenues.values()].reduce((s, v) => s + v, 0)
+  const channelTotal = [...mixChannelRevenues.values()].reduce((s, v) => s + v, 0)
   const channelMixData = DISPLAY_CHANNELS.map(({ key, label, color }) => {
-    const val = latestChannelRevenues.get(key) ?? 0
-    const prior = priorChannelRevenues.get(key) ?? 0
-    const momPct = prior > 0 ? ((val - prior) / prior) * 100 : null
-    return { label, value: val, color, momPct }
+    const val = mixChannelRevenues.get(key) ?? 0
+    const pyVal = mixPyChannelRevenues.get(key) ?? 0
+    const yoyPct = pyVal > 0 ? ((val - pyVal) / pyVal) * 100 : null
+    return { label, value: val, color, yoyPct }
   }).filter((d) => d.value > 0)
 
-  const last12 = pnl.slice(0, 12).reverse()
-  const revenueTrend = last12.map((m) => {
+  const completedForChart = pnl.filter((m) => !m.is_partial)
+  const last12 = completedForChart.slice(0, 12).reverse()
+  const hasPriorYear = last12.some((m) => {
+    const d = new Date(String(m.month) + 'T00:00:00')
+    const pyKey = `${d.getFullYear() - 1}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+    return pnl.some((p) => String(p.month) === pyKey && (Number(p.net_revenue) || 0) > 0)
+  })
+
+  const revenueTrend = last12.map((m, idx) => {
     const monthStr = String(m.month)
     const d = new Date(monthStr + 'T00:00:00')
     const pyDate = new Date(d)
@@ -538,8 +555,39 @@ export default async function CEOOverviewPage() {
     const rev = Number(m.net_revenue) || 0
     const py = pyRow ? Number(pyRow.net_revenue) || 0 : 0
     const yoyPct = py > 0 ? ((rev - py) / py) * 100 : null
-    return { month: formatMonthLabel(monthStr), revenue: rev, priorYear: py, yoyPct }
+    const prevRev = idx > 0 ? Number(last12[idx - 1].net_revenue) || 0 : 0
+    const momPct = idx > 0 && prevRev > 0 ? ((rev - prevRev) / prevRev) * 100 : null
+    return {
+      month: formatMonthLabel(monthStr),
+      revenue: rev,
+      priorYear: py,
+      yoyPct,
+      momPct,
+      isPartial: Boolean(m.is_partial),
+    }
   })
+
+  if (latest?.is_partial) {
+    const partialRev = Number(latest.net_revenue) || 0
+    const pMonthStr = String(latest.month)
+    const pD = new Date(pMonthStr + 'T00:00:00')
+    const pPyDate = new Date(pD)
+    pPyDate.setFullYear(pD.getFullYear() - 1)
+    const pPyKey = `${pPyDate.getFullYear()}-${String(pPyDate.getMonth() + 1).padStart(2, '0')}-01`
+    const pPyRow = pnl.find((p) => String(p.month) === pPyKey)
+    const pPy = pPyRow ? Number(pPyRow.net_revenue) || 0 : 0
+    const pYoyPct = pPy > 0 ? ((partialRev - pPy) / pPy) * 100 : null
+    const lastCompleteRev = last12.length > 0 ? Number(last12[last12.length - 1].net_revenue) || 0 : 0
+    const pMomPct = lastCompleteRev > 0 ? ((partialRev - lastCompleteRev) / lastCompleteRev) * 100 : null
+    revenueTrend.push({
+      month: formatMonthLabel(pMonthStr) + '*',
+      revenue: partialRev,
+      priorYear: pPy,
+      yoyPct: pYoyPct,
+      momPct: pMomPct,
+      isPartial: true,
+    })
+  }
 
   const cashRunwayData = latestForecastRows.map((f) => ({
     week: `Wk ${f.week_number}`,
@@ -785,12 +833,14 @@ export default async function CEOOverviewPage() {
             <CardTitle>Revenue vs Prior Year</CardTitle>
           </CardHeader>
           <CardContent>
-            <RevenueBarChart data={revenueTrend} />
+            <RevenueBarChart data={revenueTrend} hasPriorYear={hasPriorYear} />
           </CardContent>
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Channel Revenue Mix</CardTitle>
+            <CardTitle>
+              Channel Mix{mixMonth ? ` — ${formatMonthLabel(mixMonth)}` : ''}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <ChannelMixChart data={channelMixData} total={channelTotal} />
