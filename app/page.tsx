@@ -131,6 +131,7 @@ export default async function CEOOverviewPage() {
 
   const latest = pnl[0]
   const priorYear = pnl.length >= 13 ? pnl[12] : null
+  const latestMonth = latest?.month
 
   // Run Rate = latest month net_revenue × 12
   const latestRevenue = latest ? Number(latest.net_revenue) || 0 : null
@@ -309,7 +310,6 @@ export default async function CEOOverviewPage() {
 
   // Channel Donut — roll up wholesale sub-channels into one slice
   const WHOLESALE_KEYS = new Set(['wholesale_faire', 'wholesale_direct', 'wholesale_key'])
-  const latestMonth = latest?.month
   const rawChannelData = latestMonth
     ? channelPnl.filter((r) => r.month === latestMonth)
     : []
