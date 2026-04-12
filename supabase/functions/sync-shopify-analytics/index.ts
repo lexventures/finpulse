@@ -87,19 +87,36 @@ Deno.serve(async (req) => {
   const syncId = syncLog?.id ?? ''
 
   const shop = Deno.env.get('SHOPIFY_DTC_SHOP') || 'emilylex.myshopify.com'
-  const sessionId = `offline_${shop}`
-  const { data: storedSession, error: sessionError } = await supabase
+  let accessToken: string | null = null
+
+  const { data: storedSession } = await supabase
     .from('shopify_sessions')
     .select('access_token')
-    .eq('id', sessionId)
+    .eq('id', `offline_${shop}`)
     .eq('shop', shop)
     .maybeSingle()
+  accessToken = storedSession?.access_token ?? null
 
-  const accessToken = storedSession?.access_token ?? null
-  if (sessionError || !accessToken) {
-    const msg = sessionError
-      ? `Failed to load Shopify offline token for ${shop}: ${sessionError.message}`
-      : `Missing Shopify offline token for ${shop}. Open the embedded app in that store to complete token exchange.`
+  if (!accessToken) {
+    const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
+    const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
+    if (clientId && clientSecret) {
+      try {
+        const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+        })
+        if (tokenRes.ok) {
+          const tokenData = await tokenRes.json()
+          accessToken = tokenData.access_token ?? null
+        }
+      } catch { /* fallthrough to error */ }
+    }
+  }
+
+  if (!accessToken) {
+    const msg = `No Shopify access token for ${shop}. Set SHOPIFY_CLIENT_ID/SECRET or open the embedded app in that store.`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
