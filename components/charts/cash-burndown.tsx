@@ -1,7 +1,6 @@
 'use client'
 
 import { FinAreaChart } from '@/components/charts/area-chart'
-import { formatCompact } from '@/lib/utils/format'
 
 export interface CashBurndownPoint {
   week: string
@@ -49,7 +48,7 @@ export function CashBurndownChart({ data }: CashBurndownChartProps) {
       empty={data.length === 0}
       gradientFill
       referenceLines={refs.length > 0 ? refs : undefined}
-      yAxisTickFormatter={(v) => formatCompact(Number(v))}
+      formatYAxis="compact"
     />
   )
 }

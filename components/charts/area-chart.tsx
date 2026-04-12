@@ -18,6 +18,17 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
+function formatCompactTick(value: number): string {
+  const abs = Math.abs(value)
+  const sign = value < 0 ? '-' : ''
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) {
+    const k = abs / 1_000
+    return `${sign}$${k >= 100 ? Math.round(k) : k.toFixed(1)}K`
+  }
+  return `${sign}$${Math.round(abs)}`
+}
+
 interface FinAreaChartProps {
   data: Array<Record<string, unknown>>
   xKey: string
@@ -30,8 +41,8 @@ interface FinAreaChartProps {
   gradientFill?: boolean
   stacked?: boolean
   showLegend?: boolean
+  formatYAxis?: 'compact'
   className?: string
-  yAxisTickFormatter?: (value: number) => string
 }
 
 export function FinAreaChart({
@@ -46,8 +57,8 @@ export function FinAreaChart({
   gradientFill = true,
   stacked = false,
   showLegend = false,
+  formatYAxis,
   className,
-  yAxisTickFormatter,
 }: FinAreaChartProps) {
   if (loading) {
     return <Skeleton className={cn('w-full', className)} style={{ height }} />
@@ -104,7 +115,7 @@ export function FinAreaChart({
           tickMargin={8}
           fontSize={12}
           width={48}
-          tickFormatter={yAxisTickFormatter}
+          tickFormatter={formatYAxis === 'compact' ? formatCompactTick : undefined}
         />
         <ChartTooltip content={<ChartTooltipContent />} />
         {showLegend && (

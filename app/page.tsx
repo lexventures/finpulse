@@ -789,7 +789,7 @@ export default async function CEOOverviewPage() {
               empty={channelTrend.length === 0}
               stacked
               showLegend
-              yAxisTickFormatter={(v) => formatCompact(v)}
+              formatYAxis="compact"
             />
           </CardContent>
         </Card>
@@ -817,7 +817,7 @@ export default async function CEOOverviewPage() {
               empty={revenueTrend.length === 0}
               gradientFill
               showLegend
-              yAxisTickFormatter={(v) => formatCompact(v)}
+              formatYAxis="compact"
             />
           </CardContent>
         </Card>
