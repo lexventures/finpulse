@@ -221,6 +221,7 @@ export default async function CEOOverviewPage() {
     cac: number | null
     ltv: number | null
     ratio: number | null
+    hasOrderData: boolean
   }
 
   const BREAKOUT_CHANNELS: Array<{ key: string; label: string }> = [
@@ -257,17 +258,30 @@ export default async function CEOOverviewPage() {
 
     const needsProxy = chCogs === 0 && chRevenue > 0
     const chMargin = needsProxy ? companyMargin : rawMargin
+    const effectiveMargin = chMargin > 0 ? chMargin : 50
 
     let chOrders = 0
+    let hasOrderData = false
     if (key === 'dtc') {
       chOrders = newCustomers > 0 ? newCustomers : totalOrders
+      hasOrderData = true
     } else if (key === 'wholesale_faire' || key === 'wholesale_direct') {
       chOrders = wholesaleMonthOrders.get(key) ?? 0
+      hasOrderData = chOrders > 0
     }
 
-    const chCac = calcBlendedCac(chAdSpend, chOrders)
-    const chLtv = calcSimplifiedLtv(chRevenue, chOrders > 0 ? chOrders : 1, chMargin > 0 ? chMargin : 50)
-    const chRatio = chCac !== null ? calcLtvCacRatio(chLtv, chCac) : null
+    const chCac = chOrders > 0 ? calcBlendedCac(chAdSpend, chOrders) : null
+
+    let chLtv: number | null = null
+    if (chOrders > 0) {
+      chLtv = calcSimplifiedLtv(chRevenue, chOrders, effectiveMargin)
+    } else if (chRevenue > 0) {
+      chLtv = chRevenue * (effectiveMargin / 100)
+    }
+
+    const chRatio = chCac !== null && chCac > 0 && chLtv !== null
+      ? calcLtvCacRatio(chLtv, chCac)
+      : null
 
     return {
       channel: key,
@@ -277,8 +291,9 @@ export default async function CEOOverviewPage() {
       orders: chOrders,
       grossMarginPct: chMargin,
       marginIsProxy: needsProxy,
+      hasOrderData,
       cac: chCac,
-      ltv: chOrders > 0 ? chLtv : null,
+      ltv: chRevenue > 0 ? chLtv : null,
       ratio: chRatio,
     }
   })
@@ -475,42 +490,55 @@ export default async function CEOOverviewPage() {
                     <td className="py-2 pr-4 text-right">{ltv !== null ? formatCurrency(ltv) : '\u2014'}</td>
                     <td className="py-2 text-right">{ltvCacRatio !== null ? `${ltvCacRatio.toFixed(1)}x` : '\u2014'}</td>
                   </tr>
-                  {channelBreakout.map((ch) => (
-                    <tr key={ch.channel} className="border-b last:border-b-0">
-                      <td className="py-2 pr-4">{ch.label}</td>
-                      <td className="py-2 pr-4 text-right">{ch.adSpend > 0 ? formatCompact(ch.adSpend) : '\u2014'}</td>
-                      <td className="py-2 pr-4 text-right">{ch.revenue > 0 ? formatCompact(ch.revenue) : '\u2014'}</td>
-                      <td className="py-2 pr-4 text-right">
-                        {ch.grossMarginPct > 0 ? (
-                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
-                            {ch.marginIsProxy ? '~' : ''}{formatPercent(ch.grossMarginPct)}
-                          </span>
-                        ) : '\u2014'}
-                      </td>
-                      <td className="py-2 pr-4 text-right">{ch.orders > 0 ? formatCount(ch.orders) : '\u2014'}</td>
-                      <td className="py-2 pr-4 text-right">{ch.cac !== null ? formatCurrency(ch.cac) : '\u2014'}</td>
-                      <td className="py-2 pr-4 text-right">
-                        {ch.ltv !== null ? (
-                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
-                            {ch.marginIsProxy ? '~' : ''}{formatCurrency(ch.ltv)}
-                          </span>
-                        ) : '\u2014'}
-                      </td>
-                      <td className="py-2 text-right">
-                        {ch.ratio !== null ? (
-                          <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
-                            {ch.marginIsProxy ? '~' : ''}{ch.ratio.toFixed(1)}x
-                          </span>
-                        ) : '\u2014'}
-                      </td>
-                    </tr>
-                  ))}
+                  {channelBreakout.map((ch) => {
+                    const approx = ch.marginIsProxy || !ch.hasOrderData
+                    return (
+                      <tr key={ch.channel} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4">{ch.label}</td>
+                        <td className="py-2 pr-4 text-right">{ch.adSpend > 0 ? formatCompact(ch.adSpend) : '\u2014'}</td>
+                        <td className="py-2 pr-4 text-right">{ch.revenue > 0 ? formatCompact(ch.revenue) : '\u2014'}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {ch.grossMarginPct > 0 ? (
+                            <span className={ch.marginIsProxy ? 'text-muted-foreground' : undefined}>
+                              {ch.marginIsProxy ? '~' : ''}{formatPercent(ch.grossMarginPct)}
+                            </span>
+                          ) : '\u2014'}
+                        </td>
+                        <td className="py-2 pr-4 text-right">{ch.orders > 0 ? formatCount(ch.orders) : '\u2014'}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {ch.cac !== null ? (
+                            <span>{formatCurrency(ch.cac)}</span>
+                          ) : '\u2014'}
+                        </td>
+                        <td className="py-2 pr-4 text-right">
+                          {ch.ltv !== null ? (
+                            <span className={approx ? 'text-muted-foreground' : undefined}>
+                              {approx ? '~' : ''}{formatCurrency(ch.ltv)}
+                            </span>
+                          ) : '\u2014'}
+                        </td>
+                        <td className="py-2 text-right">
+                          {ch.ratio !== null ? (
+                            <span className={approx ? 'text-muted-foreground' : undefined}>
+                              {approx ? '~' : ''}{ch.ratio.toFixed(1)}x
+                            </span>
+                          ) : '\u2014'}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
-            {channelBreakout.some((ch) => ch.marginIsProxy) && (
-              <p className="mt-3 text-[11px] text-muted-foreground">
-                ~ Uses company blended margin ({formatPercent(companyMargin)}) — Finaloop does not break out COGS for this channel.
+            {channelBreakout.some((ch) => ch.marginIsProxy || (!ch.hasOrderData && ch.revenue > 0)) && (
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                ~ Estimated.
+                {channelBreakout.some((ch) => ch.marginIsProxy) && (
+                  <> Margin uses company blended ({formatPercent(companyMargin)}) where COGS not tracked.</>
+                )}
+                {channelBreakout.some((ch) => !ch.hasOrderData && ch.revenue > 0) && (
+                  <> LTV = gross profit (revenue × margin) where order counts unavailable.</>
+                )}
               </p>
             )}
           </CardContent>
