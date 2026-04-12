@@ -4,7 +4,7 @@ application_url = ""
 embedded = true
 
 [access_scopes]
-scopes = "read_orders,read_products,read_inventory"
+scopes = "read_orders,read_products,read_inventory,read_analytics,read_reports"
 
 [auth]
 redirect_urls = [ "https://localhost:3000/api/auth/callback" ]
