@@ -60,18 +60,18 @@ export async function buildFactsPacket(): Promise<FactsPacket> {
     wholesaleDailyResult,
   ] = await Promise.all([
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, channel, net_revenue, gross_margin_pct, allocated_ad_spend, total_opex, is_partial')
       .gte('month', monthStart)
       .order('month', { ascending: false }),
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, channel, net_revenue')
       .gte('month', pyMonthStart)
       .lt('month', `${now.getFullYear() - 1}-${String(now.getMonth() + 2).padStart(2, '0')}-01`),
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, channel, net_revenue, gross_margin_pct, total_opex')
       .gte('month', threeMonthsAgo)
       .lt('month', monthStart)
       .eq('channel', 'company')

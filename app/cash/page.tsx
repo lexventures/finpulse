@@ -48,8 +48,8 @@ export default async function CashPage() {
         .order('date', { ascending: false })
         .limit(1),
       supabase
-        .from('fin_pnl_monthly')
-        .select('*')
+        .from('fin_kpi_monthly')
+        .select('month, total_opex')
         .eq('channel', 'company')
         .order('month', { ascending: false })
         .limit(3),

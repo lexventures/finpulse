@@ -74,11 +74,11 @@ async function buildFactsPacket(supabase: SupabaseClient): Promise<FactsPacket> 
     alertsResult,
     wholesaleDailyResult,
   ] = await Promise.all([
-    supabase.from('fin_pnl_monthly').select('*').gte('month', monthStart).order('month', { ascending: false }),
-    supabase.from('fin_pnl_monthly').select('*').gte('month', pyMonthStart)
+    supabase.from('fin_kpi_monthly').select('month, channel, net_revenue, gross_margin_pct, allocated_ad_spend, total_opex, is_partial').gte('month', monthStart).order('month', { ascending: false }),
+    supabase.from('fin_kpi_monthly').select('month, channel, net_revenue').gte('month', pyMonthStart)
       .lt('month', `${now.getFullYear() - 1}-${String(now.getMonth() + 2).padStart(2, '0')}-01`)
       .eq('channel', 'company'),
-    supabase.from('fin_pnl_monthly').select('*').gte('month', threeMonthsAgo)
+    supabase.from('fin_kpi_monthly').select('month, channel, net_revenue, gross_margin_pct').gte('month', threeMonthsAgo)
       .lt('month', monthStart).eq('channel', 'company').order('month', { ascending: true }),
     supabase.from('fin_revenue_daily').select('*').gte('date', monthStart).eq('channel', 'dtc'),
     supabase.from('fin_balance_sheet_monthly').select('*').order('month', { ascending: false }).limit(1),

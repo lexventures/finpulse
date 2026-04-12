@@ -47,6 +47,9 @@ export default async function SettingsPage() {
           'finaloop_pnl_sheet_id',
           'finaloop_balance_sheet_id',
           'finaloop_cashflow_sheet_id',
+          'finaloop_pnl_tab',
+          'finaloop_balance_sheet_tab',
+          'finaloop_cashflow_tab',
           'google_service_account_email',
         ]),
     ])
@@ -71,6 +74,9 @@ export default async function SettingsPage() {
     finaloop_pnl_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_pnl_sheet_id'),
     finaloop_balance_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_balance_sheet_id'),
     finaloop_cashflow_sheet_id: getSettingValue<string>(settingsRows, 'finaloop_cashflow_sheet_id'),
+    finaloop_pnl_tab: getSettingValue<string>(settingsRows, 'finaloop_pnl_tab'),
+    finaloop_balance_sheet_tab: getSettingValue<string>(settingsRows, 'finaloop_balance_sheet_tab'),
+    finaloop_cashflow_tab: getSettingValue<string>(settingsRows, 'finaloop_cashflow_tab'),
     google_service_account_email: getSettingValue<string>(settingsRows, 'google_service_account_email'),
   }
 

@@ -30,8 +30,8 @@ export default async function ScenariosPage() {
       .select('*')
       .order('created_at', { ascending: false }),
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, gross_margin_pct, cogs, allocated_ad_spend, payroll, contribution_margin_pct, net_profit, total_opex, is_partial')
       .eq('channel', 'company')
       .order('month', { ascending: false })
       .limit(1),

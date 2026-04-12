@@ -35,7 +35,6 @@ function projectCashForecast(
   monthlyOutflows: Record<string, number>,
   growthRate: number,
   incomingInventoryValue: number,
-  currentMonth: number,
 ): WeekProjection[] {
   const totalMonthlyInflows = Object.values(monthlyInflows).reduce((s, v) => s + v, 0)
   const totalMonthlyOutflows = Object.values(monthlyOutflows).reduce((s, v) => s + v, 0)
@@ -109,7 +108,7 @@ Deno.serve(async (req) => {
 
     // 2. Monthly inflows by channel (latest month's net_revenue per channel)
     const { data: channelRows } = await supabase
-      .from('fin_pnl_monthly')
+      .from('fin_kpi_monthly')
       .select('channel, net_revenue, month')
       .neq('channel', 'company')
       .order('month', { ascending: false })
@@ -136,14 +135,14 @@ Deno.serve(async (req) => {
 
     // 3. Monthly outflows by category (from company P&L + cashflow)
     const { data: companyPnl } = await supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, allocated_ad_spend, total_opex, payroll')
       .eq('channel', 'company')
       .order('month', { ascending: false })
       .limit(3)
 
     const latestCompany = companyPnl?.[0]
-    const totalPayroll = Math.abs(Number(latestCompany?.total_payroll) || 0)
+    const totalPayroll = Math.abs(Number(latestCompany?.payroll) || 0)
     const adSpend = Math.abs(Number(latestCompany?.allocated_ad_spend) || 0)
     const totalOpex = Math.abs(Number(latestCompany?.total_opex) || 0)
     const otherOpex = Math.max(0, totalOpex - totalPayroll - adSpend)
@@ -189,18 +188,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 6. Current month
+    // 6. Run projection
     const today = todayStr()
-    const currentMonth = new Date(today + 'T12:00:00Z').getMonth() + 1
-
-    // 7. Run projection
     const projections = projectCashForecast(
       startingCash,
       inflowChannels,
       outflowCategories,
       growthRate,
       incomingInventory,
-      currentMonth,
     )
 
     if (projections.length === 0) {
@@ -213,7 +208,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    // 8. Build upsert rows with per-channel/category splits
+    // 7. Build upsert rows with per-channel/category splits
     const totalMonthlyInflows = Object.values(inflowChannels).reduce((s, v) => s + v, 0)
     const totalMonthlyOutflows = Object.values(outflowCategories).reduce((s, v) => s + v, 0)
 

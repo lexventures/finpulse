@@ -14,8 +14,33 @@ const SettingsSchema = z.object({
   finaloop_pnl_sheet_id: z.string().optional(),
   finaloop_balance_sheet_id: z.string().optional(),
   finaloop_cashflow_sheet_id: z.string().optional(),
+  finaloop_pnl_tab: z.string().optional(),
+  finaloop_balance_sheet_tab: z.string().optional(),
+  finaloop_cashflow_tab: z.string().optional(),
   pin_protected_pages: z.array(z.string()).optional(),
 })
+
+const SHEET_ID_RE = /^[a-zA-Z0-9_-]{20,}$/
+
+function normalizeSheetIdInput(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const matched = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  const sheetId = (matched ? matched[1] : trimmed).replace(/['"]/g, '').trim()
+  if (!SHEET_ID_RE.test(sheetId)) {
+    throw new Error(`Invalid Google Sheet ID format: ${value}`)
+  }
+  return sheetId
+}
+
+function normalizeTabInput(value: string): string {
+  const normalized = value.trim()
+  if (!normalized) return ''
+  if (normalized.length > 120) {
+    throw new Error('Tab name must be 120 characters or fewer')
+  }
+  return normalized
+}
 
 export async function POST(request: NextRequest) {
   return withAuth(request, async () => {
@@ -31,6 +56,36 @@ export async function POST(request: NextRequest) {
     const supabase = createServiceClient()
     const settingsToSave: Array<{ key: string; value: unknown }> = []
     const now = new Date().toISOString()
+    let normalizedPnlSheetId: string | undefined
+    let normalizedBalanceSheetId: string | undefined
+    let normalizedCashflowSheetId: string | undefined
+    let normalizedPnlTab: string | undefined
+    let normalizedBalanceTab: string | undefined
+    let normalizedCashflowTab: string | undefined
+
+    try {
+      if (parsed.data.finaloop_pnl_sheet_id !== undefined) {
+        normalizedPnlSheetId = normalizeSheetIdInput(parsed.data.finaloop_pnl_sheet_id)
+      }
+      if (parsed.data.finaloop_balance_sheet_id !== undefined) {
+        normalizedBalanceSheetId = normalizeSheetIdInput(parsed.data.finaloop_balance_sheet_id)
+      }
+      if (parsed.data.finaloop_cashflow_sheet_id !== undefined) {
+        normalizedCashflowSheetId = normalizeSheetIdInput(parsed.data.finaloop_cashflow_sheet_id)
+      }
+      if (parsed.data.finaloop_pnl_tab !== undefined) {
+        normalizedPnlTab = normalizeTabInput(parsed.data.finaloop_pnl_tab)
+      }
+      if (parsed.data.finaloop_balance_sheet_tab !== undefined) {
+        normalizedBalanceTab = normalizeTabInput(parsed.data.finaloop_balance_sheet_tab)
+      }
+      if (parsed.data.finaloop_cashflow_tab !== undefined) {
+        normalizedCashflowTab = normalizeTabInput(parsed.data.finaloop_cashflow_tab)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
 
     if (parsed.data.alert_digest_email !== undefined || parsed.data.sync_failure_email !== undefined) {
       settingsToSave.push({
@@ -53,14 +108,23 @@ export async function POST(request: NextRequest) {
     if (parsed.data.shipping_allocation_method !== undefined) {
       settingsToSave.push({ key: 'shipping_allocation_method', value: parsed.data.shipping_allocation_method })
     }
-    if (parsed.data.finaloop_pnl_sheet_id !== undefined) {
-      settingsToSave.push({ key: 'finaloop_pnl_sheet_id', value: parsed.data.finaloop_pnl_sheet_id })
+    if (normalizedPnlSheetId !== undefined) {
+      settingsToSave.push({ key: 'finaloop_pnl_sheet_id', value: normalizedPnlSheetId })
     }
-    if (parsed.data.finaloop_balance_sheet_id !== undefined) {
-      settingsToSave.push({ key: 'finaloop_balance_sheet_id', value: parsed.data.finaloop_balance_sheet_id })
+    if (normalizedBalanceSheetId !== undefined) {
+      settingsToSave.push({ key: 'finaloop_balance_sheet_id', value: normalizedBalanceSheetId })
     }
-    if (parsed.data.finaloop_cashflow_sheet_id !== undefined) {
-      settingsToSave.push({ key: 'finaloop_cashflow_sheet_id', value: parsed.data.finaloop_cashflow_sheet_id })
+    if (normalizedCashflowSheetId !== undefined) {
+      settingsToSave.push({ key: 'finaloop_cashflow_sheet_id', value: normalizedCashflowSheetId })
+    }
+    if (normalizedPnlTab !== undefined) {
+      settingsToSave.push({ key: 'finaloop_pnl_tab', value: normalizedPnlTab })
+    }
+    if (normalizedBalanceTab !== undefined) {
+      settingsToSave.push({ key: 'finaloop_balance_sheet_tab', value: normalizedBalanceTab })
+    }
+    if (normalizedCashflowTab !== undefined) {
+      settingsToSave.push({ key: 'finaloop_cashflow_tab', value: normalizedCashflowTab })
     }
     if (parsed.data.pin_protected_pages !== undefined) {
       settingsToSave.push({ key: 'pin_protected_pages', value: parsed.data.pin_protected_pages })

@@ -22,12 +22,12 @@ export default async function MarketplacesPage() {
 
   const [marketplaceResult, companyResult] = await Promise.all([
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, gross_margin_pct, contribution_margin, is_partial')
       .eq('channel', 'marketplace')
       .order('month', { ascending: true }),
     supabase
-      .from('fin_pnl_monthly')
+      .from('fin_kpi_monthly')
       .select('month, net_revenue')
       .eq('channel', 'company')
       .order('month', { ascending: true }),

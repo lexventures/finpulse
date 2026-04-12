@@ -78,6 +78,9 @@ interface SettingsValues {
   finaloop_pnl_sheet_id?: string
   finaloop_balance_sheet_id?: string
   finaloop_cashflow_sheet_id?: string
+  finaloop_pnl_tab?: string
+  finaloop_balance_sheet_tab?: string
+  finaloop_cashflow_tab?: string
   google_service_account_email?: string
 }
 
@@ -121,14 +124,25 @@ function durationStr(started: string, completed: string | null): string {
   return `${mins}m ${rem}s`
 }
 
-const SOURCES = ['finaloop', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast'] as const
+const SOURCES = ['finaloop', 'kpi_facts', 'shopify_dtc', 'shopify_wholesale', 'shopify_analytics', 'cash_forecast'] as const
 
 const SOURCE_LABELS: Record<string, string> = {
   finaloop: 'Finaloop',
+  finaloop_sheets: 'Finaloop',
+  kpi_facts: 'KPI Facts',
   shopify_dtc: 'Shopify DTC',
   shopify_wholesale: 'Shopify Wholesale',
   shopify_analytics: 'Shopify Analytics',
   cash_forecast: 'Cash Forecast',
+}
+
+const SOURCE_LOG_KEY: Record<(typeof SOURCES)[number], string> = {
+  finaloop: 'finaloop_sheets',
+  kpi_facts: 'kpi_facts',
+  shopify_dtc: 'shopify_dtc',
+  shopify_wholesale: 'shopify_wholesale',
+  shopify_analytics: 'shopify_analytics',
+  cash_forecast: 'cash_forecast',
 }
 
 export function SettingsTabs({
@@ -163,12 +177,13 @@ export function SettingsTabs({
         {/* Tab 0: Dashboard */}
         <TabsContent value={0}>
           <div className="space-y-4 pt-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {SOURCES.map((source) => (
                 <SyncSourceCard
                   key={source}
                   source={source}
-                  log={latestBySource.get(source) ?? null}
+                  logSource={SOURCE_LOG_KEY[source]}
+                  log={latestBySource.get(SOURCE_LOG_KEY[source]) ?? null}
                 />
               ))}
             </div>
@@ -435,6 +450,7 @@ export function SettingsTabs({
                 <ol className="list-decimal list-inside space-y-1 text-sm">
                   <li>Finaloop auto-exports P&amp;L, Balance Sheet, and Cash Flow to Google Sheets daily</li>
                   <li>FinPulse reads those sheets via the Google Sheets API and parses financial data into channel-segmented monthly rows</li>
+                  <li>The sync atomically updates raw finance tables, then rebuilds a KPI fact layer used by dashboard calculations</li>
                   <li>Shopify order and analytics data is pulled via ShopifyQL (aggregated, no individual orders stored)</li>
                   <li>All data lands in Supabase Postgres, where the dashboard pages query it</li>
                   <li>The alert engine evaluates 20 thresholds daily and sends email digests via Resend</li>
@@ -495,7 +511,8 @@ export function SettingsTabs({
                   <h4 className="font-semibold">Step 5: Run the Sync</h4>
                   <p className="text-muted-foreground">
                     Go to <strong>Settings &rarr; Dashboard</strong> tab and click <strong>Run Sync</strong> on the Finaloop card.
-                    The sync will pull data from the Google Sheets, parse it, and populate all financial tables.
+                    The sync will pull data from the Google Sheets, parse it, atomically update all three finance statements,
+                    and rebuild the KPI fact layer used by the app.
                     After a successful sync, the CEO Overview and channel pages will show real data.
                   </p>
                 </div>
@@ -609,6 +626,7 @@ export function SettingsTabs({
                       <tr><td className="px-3 py-1.5">4:00 AM</td><td className="px-3 py-1.5">sync-shopify-dtc</td><td className="px-3 py-1.5 text-muted-foreground">Shopify emilylex &rarr; daily revenue + membership + inventory</td></tr>
                       <tr><td className="px-3 py-1.5">4:15 AM</td><td className="px-3 py-1.5">sync-shopify-wholesale</td><td className="px-3 py-1.5 text-muted-foreground">Shopify elsw &rarr; Faire/Direct daily revenue</td></tr>
                       <tr><td className="px-3 py-1.5">4:30 AM</td><td className="px-3 py-1.5">sync-finaloop-sheets</td><td className="px-3 py-1.5 text-muted-foreground">Google Sheets &rarr; monthly P&amp;L, Balance Sheet, Cash Flow</td></tr>
+                      <tr><td className="px-3 py-1.5">4:35 AM</td><td className="px-3 py-1.5">run-kpi-facts</td><td className="px-3 py-1.5 text-muted-foreground">Rebuild canonical KPI monthly facts from raw finance tables</td></tr>
                       <tr><td className="px-3 py-1.5">4:45 AM</td><td className="px-3 py-1.5">sync-shopify-analytics</td><td className="px-3 py-1.5 text-muted-foreground">ShopifyQL &rarr; sessions, conversion, cart abandonment</td></tr>
                       <tr><td className="px-3 py-1.5">5:15 AM</td><td className="px-3 py-1.5">run-alert-engine</td><td className="px-3 py-1.5 text-muted-foreground">Evaluate 20 alert thresholds</td></tr>
                       <tr><td className="px-3 py-1.5">5:30 AM</td><td className="px-3 py-1.5">generate-briefing</td><td className="px-3 py-1.5 text-muted-foreground">Claude AI morning briefing</td></tr>
@@ -640,14 +658,16 @@ function NotificationsForm({
   const [syncEmail, setSyncEmail] = useState(initialSyncEmail)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   async function handleSave(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     setSaved(false)
+    setSaveError('')
 
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -655,9 +675,13 @@ function NotificationsForm({
           sync_failure_email: syncEmail,
         }),
       })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? `Save failed (${res.status})`)
+      }
       setSaved(true)
-    } catch {
-      // silently handle
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Save failed')
     } finally {
       setSaving(false)
     }
@@ -701,6 +725,9 @@ function NotificationsForm({
             {saved && (
               <span className="text-sm text-emerald-600">Saved</span>
             )}
+            {saveError && (
+              <span className="text-sm text-destructive">{saveError}</span>
+            )}
           </div>
         </form>
       </CardContent>
@@ -718,15 +745,20 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
   const [pnlSheetId, setPnlSheetId] = useState(settings.finaloop_pnl_sheet_id ?? '')
   const [balanceSheetId, setBalanceSheetId] = useState(settings.finaloop_balance_sheet_id ?? '')
   const [cashflowSheetId, setCashflowSheetId] = useState(settings.finaloop_cashflow_sheet_id ?? '')
+  const [pnlTab, setPnlTab] = useState(settings.finaloop_pnl_tab ?? 'Profit and Loss')
+  const [balanceSheetTab, setBalanceSheetTab] = useState(settings.finaloop_balance_sheet_tab ?? 'Balance Sheet')
+  const [cashflowTab, setCashflowTab] = useState(settings.finaloop_cashflow_tab ?? 'Cash Flow')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   async function handleSave(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     setSaved(false)
+    setSaveError('')
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -737,11 +769,18 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
           finaloop_pnl_sheet_id: pnlSheetId,
           finaloop_balance_sheet_id: balanceSheetId,
           finaloop_cashflow_sheet_id: cashflowSheetId,
+          finaloop_pnl_tab: pnlTab,
+          finaloop_balance_sheet_tab: balanceSheetTab,
+          finaloop_cashflow_tab: cashflowTab,
         }),
       })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? `Save failed (${res.status})`)
+      }
       setSaved(true)
-    } catch {
-      // silently handle
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Save failed')
     } finally {
       setSaving(false)
     }
@@ -830,6 +869,7 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
           <p className="text-sm text-muted-foreground">
             Enter the Google Sheets ID or full URL for each Finaloop report.
             The sheet ID is the long string in the URL between <code>/d/</code> and <code>/edit</code>.
+            All three sheets are required for a successful Finaloop sync.
           </p>
           <div className="grid gap-4 sm:grid-cols-1 max-w-xl">
             <div className="space-y-1.5">
@@ -856,6 +896,30 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
                 placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
               />
             </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">P&amp;L Tab Name</label>
+              <Input
+                value={pnlTab}
+                onChange={(e) => { setPnlTab(e.target.value); setSaved(false) }}
+                placeholder="Profit and Loss"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Balance Sheet Tab Name</label>
+              <Input
+                value={balanceSheetTab}
+                onChange={(e) => { setBalanceSheetTab(e.target.value); setSaved(false) }}
+                placeholder="Balance Sheet"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Cash Flow Tab Name</label>
+              <Input
+                value={cashflowTab}
+                onChange={(e) => { setCashflowTab(e.target.value); setSaved(false) }}
+                placeholder="Cash Flow"
+              />
+            </div>
           </div>
           {settings.google_service_account_email && (
             <div className="rounded-md border bg-muted/50 p-3 max-w-xl">
@@ -877,6 +941,9 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
         </Button>
         {saved && (
           <span className="text-sm text-emerald-600">Saved</span>
+        )}
+        {saveError && (
+          <span className="text-sm text-destructive">{saveError}</span>
         )}
       </div>
     </form>
@@ -926,11 +993,12 @@ function PinManagement({
     setSavingPages(true)
     setPagesMessage('')
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin_protected_pages: selectedPages }),
       })
+      if (!res.ok) throw new Error()
       setPagesMessage('Saved')
     } catch {
       setPagesMessage('Failed to save')
@@ -1106,9 +1174,11 @@ function PinManagement({
 
 function SyncSourceCard({
   source,
+  logSource,
   log: initialLog,
 }: {
   source: string
+  logSource: string
   log: SyncLog | null
 }) {
   const [syncing, setSyncing] = useState(false)
@@ -1120,11 +1190,13 @@ function SyncSourceCard({
       ? 'yellow'
       : !log
         ? 'red'
-        : log.status === 'success' || log.status === 'partial'
+        : log.status === 'success'
           ? 'green'
-          : log.status === 'error'
-            ? 'red'
-            : 'yellow'
+          : log.status === 'partial'
+            ? 'yellow'
+            : log.status === 'error'
+              ? 'red'
+              : 'yellow'
 
   async function handleSync() {
     setSyncing(true)
@@ -1137,22 +1209,53 @@ function SyncSourceCard({
       if (res.ok) {
         const result = body?.result
         const rows = result?.rows ?? result?.wholesale_daily_rows ?? 0
-        setResultMessage(`Sync completed — ${rows} rows`)
+        const finaloopStep = Array.isArray(result?.pipeline)
+          ? result.pipeline.find(
+            (step: { function_name?: string }) => step?.function_name === 'sync-finaloop-sheets',
+          )
+          : null
+        const finaloopResult = finaloopStep?.result ?? result
+        const warnings = Array.isArray(finaloopResult?.warnings) ? finaloopResult.warnings : []
+        const unrecognized = Array.isArray(finaloopResult?.unrecognized) ? finaloopResult.unrecognized : []
+        const status =
+          typeof result?.status === 'string'
+            ? result.status
+            : warnings.length > 0 || unrecognized.length > 0
+              ? 'partial'
+              : 'success'
+        const summaryParts: string[] = []
+        if (warnings.length > 0) summaryParts.push(`${warnings.length} warnings`)
+        if (unrecognized.length > 0) summaryParts.push(`${unrecognized.length} unmapped lines`)
+        const summary = summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''
+        setResultMessage(
+          status === 'partial'
+            ? `Sync partial — ${rows} rows${summary}`
+            : `Sync completed — ${rows} rows`,
+        )
         setLog({
           id: '',
-          source,
+          source: logSource,
           started_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
-          status: 'success',
+          status,
           rows_synced: rows,
-          error_message: null,
+          error_message:
+            status === 'partial'
+              ? [warnings.join('; '), unrecognized
+                .map((entry: { lineItem?: string; total?: number }) =>
+                  entry?.lineItem ? `${entry.lineItem} (${entry.total ?? 0})` : null)
+                .filter(Boolean)
+                .join('; ')]
+                .filter(Boolean)
+                .join(' | ')
+              : null,
         })
       } else {
         const errMsg = body?.error ?? `Failed (${res.status})`
         setResultMessage(errMsg)
         setLog({
           id: '',
-          source,
+          source: logSource,
           started_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
           status: 'error',
@@ -1196,8 +1299,14 @@ function SyncSourceCard({
                 Rows synced: {log.rows_synced}
               </p>
             )}
-            {log.error_message && log.status === 'error' && (
-              <p className="text-xs text-destructive truncate max-w-[250px]" title={log.error_message}>
+            {log.error_message && (log.status === 'error' || log.status === 'partial') && (
+              <p
+                className={cn(
+                  'text-xs truncate max-w-[250px]',
+                  log.status === 'error' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400',
+                )}
+                title={log.error_message}
+              >
                 {log.error_message}
               </p>
             )}
@@ -1217,7 +1326,11 @@ function SyncSourceCard({
         {resultMessage && (
           <p className={cn(
             'text-xs',
-            resultMessage.startsWith('Sync completed') ? 'text-emerald-600' : 'text-destructive',
+            resultMessage.startsWith('Sync completed')
+              ? 'text-emerald-600'
+              : resultMessage.startsWith('Sync partial')
+                ? 'text-amber-700 dark:text-amber-400'
+                : 'text-destructive',
           )}>
             {resultMessage}
           </p>

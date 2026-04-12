@@ -7,7 +7,6 @@ import { MetricCard } from '@/components/cards/metric-card'
 import { FinLineChart } from '@/components/charts/line-chart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  formatCurrency,
   formatPercent,
   formatCount,
   formatCompact,
@@ -44,8 +43,8 @@ export default async function TeamPage() {
       .eq('is_active', true)
       .order('start_date', { ascending: true }),
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, is_partial')
       .eq('channel', 'company')
       .order('month', { ascending: true }),
   ])

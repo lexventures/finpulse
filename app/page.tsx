@@ -54,8 +54,8 @@ export default async function CEOOverviewPage() {
     revenueDailyResult,
   ] = await Promise.all([
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, total_opex, gross_margin_pct, allocated_ad_spend, is_partial')
       .eq('channel', 'company')
       .order('month', { ascending: false })
       .limit(24),
@@ -81,8 +81,8 @@ export default async function CEOOverviewPage() {
       .order('started_at', { ascending: false })
       .limit(1),
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, channel, net_revenue')
       .neq('channel', 'company')
       .order('month', { ascending: false }),
     supabase
@@ -125,7 +125,17 @@ export default async function CEOOverviewPage() {
       : null
 
   // Cash — prefer balance sheet -> cashflow ending -> forecast starting week 1
-  const forecastStartCash = forecasts.length > 0 ? Number(forecasts[0].starting_cash) || null : null
+  const latestForecastRunDate = forecasts.length > 0
+    ? String(forecasts[0].forecast_run_date)
+    : null
+  const latestForecastRows = latestForecastRunDate
+    ? forecasts
+      .filter((f) => String(f.forecast_run_date) === latestForecastRunDate)
+      .sort((a, b) => (Number(a.week_number) || 0) - (Number(b.week_number) || 0))
+    : []
+  const forecastStartCash = latestForecastRows.length > 0
+    ? Number(latestForecastRows[0].starting_cash) || null
+    : null
   const cash =
     (balance ? Number(balance.cash_and_equivalents) || null : null) ??
     (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null) ??
@@ -175,7 +185,7 @@ export default async function CEOOverviewPage() {
   const blendedCac = calcBlendedCac(Math.abs(adSpend), cacDenominator)
 
   // 13-Week Forecast Minimum
-  const forecastCashValues = forecasts
+  const forecastCashValues = latestForecastRows
     .map((f) => Number(f.projected_ending_cash))
     .filter((v) => Number.isFinite(v))
   const forecastMin =
@@ -285,6 +295,7 @@ export default async function CEOOverviewPage() {
         <MetricCard
           title="Revenue MTD"
           value={formatCompact(latestRevenue)}
+          subtitle={latest?.is_partial ? 'Partial month' : undefined}
           trend={
             revenueYoY !== null
               ? { value: Number(revenueYoY.toFixed(1)), label: 'YoY' }

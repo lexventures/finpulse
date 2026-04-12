@@ -12,7 +12,6 @@ import { FinBarChart } from '@/components/charts/bar-chart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  formatCompact,
   formatPercent,
   formatCurrency,
   formatCount,
@@ -52,8 +51,8 @@ export default async function DTCPage(props: {
   const supabase = createServiceClient()
   const [pnlResult, dailyResult, membershipResult, analyticsResult] = await Promise.all([
     supabase
-      .from('fin_pnl_monthly')
-      .select('*')
+      .from('fin_kpi_monthly')
+      .select('month, net_revenue, gross_margin_pct, contribution_margin, allocated_ad_spend, is_partial')
       .eq('channel', 'dtc')
       .gte('month', startDate)
       .order('month', { ascending: true }),

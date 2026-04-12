@@ -1,34 +1,15 @@
 import { createClient, SupabaseClient } from 'jsr:@supabase/supabase-js@2'
+import {
+  CHANNEL_MAPPINGS,
+  CHANNELS,
+  WHOLESALE_SUBCHANNELS,
+  type FinPulseChannel as Channel,
+  type LineItemType,
+} from '../../../shared/channel-mapping.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type Channel =
-  | 'company'
-  | 'dtc'
-  | 'wholesale'
-  | 'wholesale_faire'
-  | 'wholesale_direct'
-  | 'wholesale_key'
-  | 'retail'
-  | 'marketplace'
-
-type LineItemType =
-  | 'revenue'
-  | 'discount'
-  | 'return'
-  | 'cogs'
-  | 'fee'
-  | 'shipping'
-  | 'ad_spend'
-  | 'email_marketing'
-
-interface ChannelMapping {
-  pattern: string
-  channel: Channel
-  type: LineItemType
-}
 
 interface ChannelAccumulator {
   gross_revenue: number
@@ -58,91 +39,7 @@ interface MonthMeta {
   isPartial: boolean
   colIndex: number
 }
-
-// ---------------------------------------------------------------------------
-// Channel mappings — mirrors lib/constants/channel-mapping.ts
-// ---------------------------------------------------------------------------
-
-const CHANNEL_MAPPINGS: ChannelMapping[] = [
-  // Revenue — Sales line items (Finaloop nests under "Sales" category)
-  { pattern: 'Sales - Shopify - emilylex', channel: 'dtc', type: 'revenue' },
-  { pattern: 'Sales - Facebook (via Shopify)', channel: 'dtc', type: 'revenue' },
-  { pattern: 'Sales - Faire (via Shopify)', channel: 'wholesale_faire', type: 'revenue' },
-  { pattern: 'Sales - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'revenue' },
-  { pattern: 'Sales - Wholesale', channel: 'wholesale_key', type: 'revenue' },
-  { pattern: 'Sales - Square', channel: 'retail', type: 'revenue' },
-  { pattern: 'Sales - unidentified payouts', channel: 'marketplace', type: 'revenue' },
-  { pattern: 'Affiliate marketing income', channel: 'dtc', type: 'revenue' },
-  // Revenue — nested sub-items (Finaloop indents these under parent Sales lines)
-  { pattern: 'Impact Radius', channel: 'dtc', type: 'revenue' },
-  { pattern: 'Square', channel: 'retail', type: 'revenue' },
-  { pattern: 'Amazon', channel: 'marketplace', type: 'revenue' },
-  { pattern: 'Urban Outfitters', channel: 'wholesale_key', type: 'revenue' },
-  { pattern: 'Magnolia', channel: 'wholesale_key', type: 'revenue' },
-
-  // Shipping income
-  { pattern: 'Shipping income - Shopify - emilylex', channel: 'dtc', type: 'shipping' },
-  { pattern: 'Shipping income - Facebook (via Shopify)', channel: 'dtc', type: 'shipping' },
-  { pattern: 'Shipping income - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'shipping' },
-
-  // Discounts — both old and current Finaloop naming
-  { pattern: 'Discounts - Shopify - emilylex', channel: 'dtc', type: 'discount' },
-  { pattern: 'Discounts - Facebook (via Shopify)', channel: 'dtc', type: 'discount' },
-  { pattern: 'Discounts - Faire (via Shopify)', channel: 'wholesale_faire', type: 'discount' },
-  { pattern: 'Discounts - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'discount' },
-  { pattern: 'Discounts & promotions - Shopify - emilylex', channel: 'dtc', type: 'discount' },
-  { pattern: 'Discounts & promotions - Facebook (via Shopify)', channel: 'dtc', type: 'discount' },
-  { pattern: 'Discounts & promotions - Faire (via Shopify)', channel: 'wholesale_faire', type: 'discount' },
-  { pattern: 'Discounts & promotions - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'discount' },
-
-  // Returns — both old and current Finaloop naming
-  { pattern: 'Returns - Shopify - emilylex', channel: 'dtc', type: 'return' },
-  { pattern: 'Returns - Facebook (via Shopify)', channel: 'dtc', type: 'return' },
-  { pattern: 'Returns - Faire (via Shopify)', channel: 'wholesale_faire', type: 'return' },
-  { pattern: 'Returns - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'return' },
-  { pattern: 'Refunds & returns - Shopify - emilylex', channel: 'dtc', type: 'return' },
-  { pattern: 'Refunds & returns - Facebook (via Shopify)', channel: 'dtc', type: 'return' },
-  { pattern: 'Refunds & returns - Faire (via Shopify)', channel: 'wholesale_faire', type: 'return' },
-  { pattern: 'Refunds & returns - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'return' },
-
-  // COGS — both old and current Finaloop naming
-  { pattern: 'COGS - Shopify - emilylex', channel: 'dtc', type: 'cogs' },
-  { pattern: 'COGS - Facebook (via Shopify)', channel: 'dtc', type: 'cogs' },
-  { pattern: 'COGS - Faire (via Shopify)', channel: 'wholesale_faire', type: 'cogs' },
-  { pattern: 'COGS - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'cogs' },
-  { pattern: 'Cost of goods sold - Shopify - emilylex', channel: 'dtc', type: 'cogs' },
-  { pattern: 'Cost of goods sold - Facebook (via Shopify)', channel: 'dtc', type: 'cogs' },
-  { pattern: 'Cost of goods sold - Faire (via Shopify)', channel: 'wholesale_faire', type: 'cogs' },
-  { pattern: 'Cost of goods sold - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'cogs' },
-
-  // Fees
-  { pattern: 'Fees - Shopify - emilylex', channel: 'dtc', type: 'fee' },
-  { pattern: 'Selling fees - Faire', channel: 'wholesale_faire', type: 'fee' },
-  { pattern: 'Fees - Shopify - ca9d60-2', channel: 'wholesale_direct', type: 'fee' },
-  { pattern: 'Chargeback protection - Shopify - emilylex', channel: 'dtc', type: 'fee' },
-  { pattern: 'Dispute fees - Shopify - emilylex', channel: 'dtc', type: 'fee' },
-  { pattern: 'Disputes - Shopify - emilylex', channel: 'dtc', type: 'fee' },
-  { pattern: 'Faire', channel: 'wholesale_faire', type: 'fee' },
-
-  // Ad Spend (allocated to channels)
-  { pattern: 'Paid online ads - Facebook Advertising', channel: 'dtc', type: 'ad_spend' },
-  { pattern: 'Paid online ads - Google Advertising', channel: 'dtc', type: 'ad_spend' },
-  { pattern: 'Paid online ads - Faire', channel: 'wholesale_faire', type: 'ad_spend' },
-  { pattern: 'Paid online ads - Shopify - emilylex', channel: 'dtc', type: 'ad_spend' },
-  { pattern: 'Facebook Advertising', channel: 'dtc', type: 'ad_spend' },
-  { pattern: 'Google Advertising', channel: 'dtc', type: 'ad_spend' },
-
-  // Email Marketing
-  { pattern: 'Email marketing', channel: 'dtc', type: 'email_marketing' },
-  { pattern: 'Klaviyo', channel: 'dtc', type: 'email_marketing' },
-]
-
-const CHANNELS: Channel[] = [
-  'company', 'dtc', 'wholesale', 'wholesale_faire',
-  'wholesale_direct', 'wholesale_key', 'retail', 'marketplace',
-]
-
-const WHOLESALE_SUB: Channel[] = ['wholesale_faire', 'wholesale_direct', 'wholesale_key']
+const WHOLESALE_SUB: Channel[] = [...WHOLESALE_SUBCHANNELS]
 
 // Subtotal / header rows that should never be accumulated
 const SKIP_ROW_PATTERNS = [
@@ -217,11 +114,86 @@ const MONTH_ABBREVS: Record<string, string> = {
 
 const RETRY_DELAYS = [1000, 4000, 16000]
 const MAX_ATTEMPTS = 4
+const FETCH_TIMEOUT_MS = 30_000
+const SHEET_ID_MIN_LEN = 20
+const SHEET_ID_RE = /^[a-zA-Z0-9_-]+$/
+const TAB_NAME_MAX_LEN = 120
+const TAB_NAME_FORBIDDEN = /[!:'"\\]/
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timer),
+  )
+}
+
+function validateSheetId(id: string, label: string): void {
+  if (id.length < SHEET_ID_MIN_LEN) {
+    throw new SheetConfigError(`${label} Sheet ID is too short (${id.length} chars, need ${SHEET_ID_MIN_LEN}+)`)
+  }
+  if (!SHEET_ID_RE.test(id)) {
+    throw new SheetConfigError(`${label} Sheet ID contains invalid characters`)
+  }
+}
+
+function validateTabName(name: string, label: string): void {
+  if (name.length > TAB_NAME_MAX_LEN) {
+    throw new SheetConfigError(`${label} tab name exceeds ${TAB_NAME_MAX_LEN} chars`)
+  }
+  if (TAB_NAME_FORBIDDEN.test(name)) {
+    throw new SheetConfigError(
+      `${label} tab name contains forbidden characters (! : ' " \\). ` +
+      `Use only the plain tab name, not an A1 range reference.`,
+    )
+  }
+}
+
+function validatePemKey(pem: string): void {
+  if (!pem.includes('PRIVATE KEY')) {
+    throw new SheetConfigError(
+      'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY does not contain a PEM private key header. ' +
+      'Ensure the full key (including -----BEGIN/END-----) is set.',
+    )
+  }
+  const stripped = pem
+    .replace(/-----BEGIN [A-Z ]*KEY-----/g, '')
+    .replace(/-----END [A-Z ]*KEY-----/g, '')
+    .replace(/\\n/g, '')
+    .replace(/\s/g, '')
+  if (stripped.length < 100) {
+    throw new SheetConfigError(
+      'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY appears truncated (base64 body too short).',
+    )
+  }
+}
+
+class SheetConfigError extends Error {
+  constructor(msg: string) {
+    super(msg)
+    this.name = 'SheetConfigError'
+  }
+}
+
+class NonRetryableError extends Error {
+  constructor(msg: string) {
+    super(msg)
+    this.name = 'NonRetryableError'
+  }
+}
+
+function normalizeLineItem(value: string): string {
+  return value.replace(/[\u00a0\s]+/g, ' ').trim().toLowerCase()
+}
+
+const CHANNEL_MAPPING_BY_LABEL = new Map(
+  CHANNEL_MAPPINGS.map((mapping) => [normalizeLineItem(mapping.pattern), mapping]),
+)
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -239,12 +211,33 @@ function base64urlEncode(data: Uint8Array | string): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function parseNumber(raw: string | undefined | null): number {
-  if (!raw || raw.trim() === '' || raw.trim() === '-') return 0
-  let s = raw.replace(/[$,\s]/g, '')
+let _unparsedCells: Array<{ row: number; col: number; raw: string }> = []
+
+function resetUnparsedTracking(): void {
+  _unparsedCells = []
+}
+
+function getUnparsedCells(): typeof _unparsedCells {
+  return _unparsedCells
+}
+
+function parseNumber(raw: unknown, rowHint = -1, colHint = -1): number {
+  if (raw == null) return 0
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : 0
+  }
+  const text = String(raw).trim()
+  if (text === '' || text === '-') return 0
+  let s = text.replace(/[$,\s]/g, '')
   if (s.startsWith('(') && s.endsWith(')')) s = '-' + s.slice(1, -1)
   const n = parseFloat(s)
-  return Number.isNaN(n) ? 0 : n
+  if (Number.isNaN(n)) {
+    if (text.length > 0 && _unparsedCells.length < 50) {
+      _unparsedCells.push({ row: rowHint, col: colHint, raw: text.substring(0, 60) })
+    }
+    return 0
+  }
+  return n
 }
 
 function sleep(ms: number): Promise<void> {
@@ -339,7 +332,7 @@ async function getGoogleAccessToken(email: string, privateKeyPem: string): Promi
   )
   const jwt = `${signingInput}.${base64urlEncode(new Uint8Array(sig))}`
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -349,6 +342,12 @@ async function getGoogleAccessToken(email: string, privateKeyPem: string): Promi
   })
   if (!res.ok) {
     const text = await res.text()
+    if (res.status === 401 || res.status === 403) {
+      throw new NonRetryableError(
+        `Google token exchange rejected (${res.status}): ${text}. ` +
+        'Check that GOOGLE_SERVICE_ACCOUNT_EMAIL and PRIVATE_KEY are correct.',
+      )
+    }
     throw new Error(`Google token exchange failed (${res.status}): ${text}`)
   }
   const data = await res.json()
@@ -368,7 +367,7 @@ function extractSheetId(input: string): string {
 
 interface SheetValues {
   range: string
-  values: string[][]
+  values: unknown[][]
 }
 
 async function fetchSheets(
@@ -382,26 +381,22 @@ async function fetchSheets(
   for (const name of sheetNames) url.searchParams.append('ranges', name)
   url.searchParams.set('valueRenderOption', 'UNFORMATTED_VALUE')
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithTimeout(url.toString(), {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (!res.ok) {
-    // If tab name not found, retry with Sheet1
-    if (res.status === 400 && sheetNames.length === 1 && sheetNames[0] !== 'Sheet1') {
-      const fallbackUrl = new URL(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet`,
-      )
-      fallbackUrl.searchParams.append('ranges', 'Sheet1')
-      fallbackUrl.searchParams.set('valueRenderOption', 'UNFORMATTED_VALUE')
-      const fallbackRes = await fetch(fallbackUrl.toString(), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      if (fallbackRes.ok) {
-        const body = await fallbackRes.json()
-        return (body.valueRanges ?? []) as SheetValues[]
-      }
-    }
     const text = await res.text()
+    if (res.status === 403) {
+      throw new NonRetryableError(
+        `Google Sheets access denied (403). Share the sheet with the service ` +
+        `account email as a Viewer. Details: ${text}`,
+      )
+    }
+    if (res.status === 404) {
+      throw new NonRetryableError(
+        `Google Sheets not found (404). Verify the Sheet ID and tab name are correct. Details: ${text}`,
+      )
+    }
     throw new Error(`Sheets API error (${res.status}): ${text}`)
   }
   const body = await res.json()
@@ -412,8 +407,25 @@ async function fetchSheets(
 // Month header detection
 // ---------------------------------------------------------------------------
 
-function parseMonthCell(cell: string): { month: string; isPartial: boolean } | null {
-  if (!cell || typeof cell !== 'string') return null
+function monthFromDate(date: Date): string | null {
+  if (Number.isNaN(date.getTime())) return null
+  const yyyy = date.getUTCFullYear()
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
+  return `${yyyy}-${mm}-01`
+}
+
+function parseMonthCell(rawCell: unknown): { month: string; isPartial: boolean } | null {
+  if (rawCell == null) return null
+  if (typeof rawCell === 'number') {
+    // Google Sheets serial date days since 1899-12-30.
+    if (!Number.isFinite(rawCell) || rawCell <= 0) return null
+    const utcMs = Date.UTC(1899, 11, 30) + rawCell * 86400000
+    const month = monthFromDate(new Date(utcMs))
+    return month ? { month, isPartial: false } : null
+  }
+
+  const cell = String(rawCell).trim()
+  if (!cell) return null
   const isPartial = /\(partial\)/i.test(cell)
   const cleaned = cell.replace(/\(partial\)/i, '').trim()
 
@@ -435,15 +447,23 @@ function parseMonthCell(cell: string): { month: string; isPartial: boolean } | n
   const m3 = cleaned.match(/^(\d{4})-(\d{2})-\d{2}$/)
   if (m3) return { month: `${m3[1]}-${m3[2]}-01`, isPartial }
 
+  // Format 4: numeric-like string serial date from Sheets.
+  const numeric = Number(cleaned)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const utcMs = Date.UTC(1899, 11, 30) + numeric * 86400000
+    const month = monthFromDate(new Date(utcMs))
+    if (month) return { month, isPartial }
+  }
+
   return null
 }
 
-function detectMonthRow(rows: string[][]): { rowIndex: number; months: MonthMeta[] } {
+function detectMonthRow(rows: unknown[][]): { rowIndex: number; months: MonthMeta[] } {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const row = rows[r]
     const months: MonthMeta[] = []
     for (let c = 1; c < row.length; c++) {
-      const parsed = parseMonthCell(String(row[c] ?? ''))
+      const parsed = parseMonthCell(row[c])
       if (parsed) months.push({ ...parsed, colIndex: c })
     }
     if (months.length >= 2) return { rowIndex: r, months }
@@ -461,7 +481,7 @@ function detectMonthRow(rows: string[][]): { rowIndex: number; months: MonthMeta
 interface PnlResult {
   rows: Record<string, unknown>[]
   warnings: string[]
-  unrecognized: string[]
+  unrecognized: Array<{ lineItem: string; total: number }>
 }
 
 function parsePnl(sheet: SheetValues): PnlResult {
@@ -483,7 +503,7 @@ function parsePnl(sheet: SheetValues): PnlResult {
 
   // Track reconciliation values and unrecognized items
   const totalNetSales = new Map<string, number>()
-  const unrecognized: string[] = []
+  const unrecognizedTotals = new Map<string, number>()
   const warnings: string[] = []
 
   for (let r = headerRow + 1; r < data.length; r++) {
@@ -494,21 +514,19 @@ function parsePnl(sheet: SheetValues): PnlResult {
     // Capture "Total Net Sales" for reconciliation, then skip subtotal rows
     if (/^total net sales/i.test(lineItem)) {
       for (const m of months) {
-        totalNetSales.set(m.month, parseNumber(String(row[m.colIndex] ?? '')))
+        totalNetSales.set(m.month, parseNumber(row[m.colIndex], r, m.colIndex))
       }
       continue
     }
     if (SKIP_ROW_PATTERNS.some((p) => p.test(lineItem))) continue
 
     // Try channel mapping (exact match, case-insensitive)
-    const mapping = CHANNEL_MAPPINGS.find(
-      (cm) => cm.pattern.toLowerCase() === lineItem.toLowerCase(),
-    )
+    const mapping = CHANNEL_MAPPING_BY_LABEL.get(normalizeLineItem(lineItem))
 
     if (mapping) {
       const field = accumulatorField(mapping.type, mapping.pattern)
       for (const m of months) {
-        const value = parseNumber(String(row[m.colIndex] ?? ''))
+        const value = parseNumber(row[m.colIndex], r, m.colIndex)
         if (value === 0) continue
         const entry = accByMonth.get(m.month)!
         addAccumulator(entry.channels[mapping.channel], field, value)
@@ -524,22 +542,25 @@ function parsePnl(sheet: SheetValues): PnlResult {
     const companyRule = COMPANY_FIELD_RULES.find((cr) => cr.test.test(lineItem))
     if (companyRule) {
       for (const m of months) {
-        const value = parseNumber(String(row[m.colIndex] ?? ''))
+        const value = parseNumber(row[m.colIndex], r, m.colIndex)
         if (value === 0) continue
         accByMonth.get(m.month)!.extras[companyRule.field] += value
       }
       continue
     }
 
-    // Truly unrecognized — add to company other_income_expenses
+    // Truly unrecognized — track for operator review, do not auto-book.
     let hasValue = false
+    let rowTotal = 0
     for (const m of months) {
-      const value = parseNumber(String(row[m.colIndex] ?? ''))
+      const value = parseNumber(row[m.colIndex], r, m.colIndex)
       if (value === 0) continue
       hasValue = true
-      accByMonth.get(m.month)!.extras.other_income_expenses += value
+      rowTotal += value
     }
-    if (hasValue) unrecognized.push(lineItem)
+    if (hasValue) {
+      unrecognizedTotals.set(lineItem, (unrecognizedTotals.get(lineItem) ?? 0) + rowTotal)
+    }
   }
 
   // Build output rows
@@ -628,6 +649,11 @@ function parsePnl(sheet: SheetValues): PnlResult {
     }
   }
 
+  const unrecognized = [...unrecognizedTotals.entries()].map(([lineItem, total]) => ({
+    lineItem,
+    total: round2(total),
+  }))
+
   return { rows: dbRows, warnings, unrecognized }
 }
 
@@ -656,13 +682,36 @@ function parseSimpleSheet(
     if (!rule) continue
 
     for (const m of months) {
-      const value = parseNumber(String(data[r][m.colIndex] ?? ''))
+      const value = parseNumber(data[r][m.colIndex], r, m.colIndex)
       const row = monthData.get(m.month)!
       row[rule.col] = round2(value)
     }
   }
 
   return [...monthData.values()]
+}
+
+function hasDefinedValue(row: Record<string, unknown>, key: string): boolean {
+  return row[key] !== null && row[key] !== undefined
+}
+
+function validateRequiredFields(
+  label: string,
+  rows: Record<string, unknown>[],
+  requiredAnyFields: string[],
+): void {
+  if (rows.length === 0) {
+    throw new Error(`${label} sheet parsed zero month rows.`)
+  }
+
+  for (const row of rows) {
+    const ok = requiredAnyFields.some((field) => hasDefinedValue(row, field))
+    if (!ok) {
+      throw new Error(
+        `${label} month ${String(row.month ?? 'unknown')} is missing expected fields (${requiredAnyFields.join(', ')})`,
+      )
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -705,21 +754,48 @@ Deno.serve(async (req) => {
     .replace(/"\s*$/g, '')
     .replace(/^\s*"/g, '')
 
-  // Load Sheet IDs: query params > env vars > fin_settings
+  try {
+    validatePemKey(saKey)
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error)
+    await supabase.from('fin_sync_log').update({
+      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
+    }).eq('id', syncId)
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500,
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Load Sheet IDs / tab names: query params > env vars > fin_settings > defaults
   const url = new URL(req.url)
   let pnlSheetId = url.searchParams.get('pnl_sheet_id') ?? Deno.env.get('FINALOOP_PNL_SHEET_ID') ?? ''
   let bsSheetId = url.searchParams.get('bs_sheet_id') ?? Deno.env.get('FINALOOP_BALANCE_SHEET_ID') ?? ''
   let cfSheetId = url.searchParams.get('cf_sheet_id') ?? Deno.env.get('FINALOOP_CASHFLOW_SHEET_ID') ?? ''
+  let pnlTabSetting = url.searchParams.get('pnl_tab') ?? Deno.env.get('FINALOOP_PNL_TAB') ?? ''
+  let bsTabSetting = url.searchParams.get('bs_tab') ?? Deno.env.get('FINALOOP_BS_TAB') ?? ''
+  let cfTabSetting = url.searchParams.get('cf_tab') ?? Deno.env.get('FINALOOP_CF_TAB') ?? ''
 
-  // Fallback: single sheet ID for all three (legacy)
+  // Fallback: single sheet ID for all three.
   const legacyId = url.searchParams.get('sheet_id') ?? Deno.env.get('FINALOOP_SHEET_ID') ?? ''
 
-  // If any are missing, try reading from fin_settings
-  if (!pnlSheetId || !bsSheetId || !cfSheetId) {
+  if (!pnlSheetId && legacyId) pnlSheetId = legacyId
+  if (!bsSheetId && legacyId) bsSheetId = legacyId
+  if (!cfSheetId && legacyId) cfSheetId = legacyId
+
+  // If any IDs/tabs are missing, try reading from fin_settings.
+  if (!pnlSheetId || !bsSheetId || !cfSheetId || !pnlTabSetting || !bsTabSetting || !cfTabSetting) {
     const { data: settingsRows } = await supabase
       .from('fin_settings')
       .select('key, value')
-      .in('key', ['finaloop_pnl_sheet_id', 'finaloop_balance_sheet_id', 'finaloop_cashflow_sheet_id'])
+      .in('key', [
+        'finaloop_pnl_sheet_id',
+        'finaloop_balance_sheet_id',
+        'finaloop_cashflow_sheet_id',
+        'finaloop_pnl_tab',
+        'finaloop_balance_sheet_tab',
+        'finaloop_cashflow_tab',
+      ])
 
     const settingsMap = new Map(
       (settingsRows ?? []).map((r: { key: string; value: unknown }) => [r.key, r.value]),
@@ -728,15 +804,21 @@ Deno.serve(async (req) => {
     if (!pnlSheetId) pnlSheetId = extractSheetId(String(settingsMap.get('finaloop_pnl_sheet_id') ?? ''))
     if (!bsSheetId) bsSheetId = extractSheetId(String(settingsMap.get('finaloop_balance_sheet_id') ?? ''))
     if (!cfSheetId) cfSheetId = extractSheetId(String(settingsMap.get('finaloop_cashflow_sheet_id') ?? ''))
+    if (!pnlTabSetting) pnlTabSetting = String(settingsMap.get('finaloop_pnl_tab') ?? '')
+    if (!bsTabSetting) bsTabSetting = String(settingsMap.get('finaloop_balance_sheet_tab') ?? '')
+    if (!cfTabSetting) cfTabSetting = String(settingsMap.get('finaloop_cashflow_tab') ?? '')
   }
 
-  // Apply legacy fallback
-  if (!pnlSheetId) pnlSheetId = legacyId
-  if (!bsSheetId) bsSheetId = legacyId
-  if (!cfSheetId) cfSheetId = legacyId
+  pnlSheetId = extractSheetId(pnlSheetId)
+  bsSheetId = extractSheetId(bsSheetId)
+  cfSheetId = extractSheetId(cfSheetId)
 
-  if (!pnlSheetId) {
-    const msg = 'Missing P&L Sheet ID. Set it in Settings > Channels > Data Sources, or via FINALOOP_PNL_SHEET_ID env var.'
+  const missingSheetLabels: string[] = []
+  if (!pnlSheetId) missingSheetLabels.push('P&L')
+  if (!bsSheetId) missingSheetLabels.push('Balance Sheet')
+  if (!cfSheetId) missingSheetLabels.push('Cash Flow')
+  if (missingSheetLabels.length > 0) {
+    const msg = `Missing required Finaloop Sheet IDs: ${missingSheetLabels.join(', ')}. Set all three in Settings > Channels > Data Sources.`
     await supabase.from('fin_sync_log').update({
       status: 'error', completed_at: new Date().toISOString(), error_message: msg,
     }).eq('id', syncId)
@@ -746,14 +828,27 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Tab names — try settings, env vars, then common Finaloop defaults
-  const pnlTabSetting = url.searchParams.get('pnl_tab') ?? Deno.env.get('FINALOOP_PNL_TAB') ?? ''
-  const bsTabSetting = url.searchParams.get('bs_tab') ?? Deno.env.get('FINALOOP_BS_TAB') ?? ''
-  const cfTabSetting = url.searchParams.get('cf_tab') ?? Deno.env.get('FINALOOP_CF_TAB') ?? ''
+  const pnlTab = String(pnlTabSetting || 'Profit and Loss').trim()
+  const bsTab = String(bsTabSetting || 'Balance Sheet').trim()
+  const cfTab = String(cfTabSetting || 'Cash Flow').trim()
 
-  const pnlTab = pnlTabSetting || 'Profit and Loss'
-  const bsTab = bsTabSetting || 'Balance Sheet'
-  const cfTab = cfTabSetting || 'Cash Flow'
+  try {
+    validateSheetId(pnlSheetId, 'P&L')
+    validateSheetId(bsSheetId, 'Balance Sheet')
+    validateSheetId(cfSheetId, 'Cash Flow')
+    validateTabName(pnlTab, 'P&L')
+    validateTabName(bsTab, 'Balance Sheet')
+    validateTabName(cfTab, 'Cash Flow')
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error)
+    await supabase.from('fin_sync_log').update({
+      status: 'error', completed_at: new Date().toISOString(), error_message: msg,
+    }).eq('id', syncId)
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 400,
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    })
+  }
 
   // Determine if all three are in the same spreadsheet or separate
   const allSameSheet = pnlSheetId === bsSheetId && bsSheetId === cfSheetId
@@ -768,6 +863,8 @@ Deno.serve(async (req) => {
         await sleep(RETRY_DELAYS[attempt - 2])
       }
 
+      resetUnparsedTracking()
+
       // 1. Google auth
       const accessToken = await getGoogleAccessToken(saEmail, saKey)
 
@@ -777,84 +874,105 @@ Deno.serve(async (req) => {
       let cfSheet: SheetValues | null = null
 
       if (allSameSheet) {
-        const tabs = [pnlTab]
-        if (bsSheetId) tabs.push(bsTab)
-        if (cfSheetId) tabs.push(cfTab)
-        const sheets = await fetchSheets(accessToken, pnlSheetId, tabs)
+        const sheets = await fetchSheets(accessToken, pnlSheetId, [pnlTab, bsTab, cfTab])
         pnlSheet = sheets[0] ?? null
         bsSheet = sheets[1] ?? null
         cfSheet = sheets[2] ?? null
       } else {
-        const [pnlSheets] = await Promise.all([
+        const [pnlSheets, bsSheets, cfSheets] = await Promise.all([
           fetchSheets(accessToken, pnlSheetId, [pnlTab]),
+          fetchSheets(accessToken, bsSheetId, [bsTab]),
+          fetchSheets(accessToken, cfSheetId, [cfTab]),
         ])
         pnlSheet = pnlSheets[0] ?? null
-
-        if (bsSheetId) {
-          const bsSheets = await fetchSheets(accessToken, bsSheetId, [bsTab])
-          bsSheet = bsSheets[0] ?? null
-        }
-        if (cfSheetId) {
-          const cfSheets = await fetchSheets(accessToken, cfSheetId, [cfTab])
-          cfSheet = cfSheets[0] ?? null
-        }
+        bsSheet = bsSheets[0] ?? null
+        cfSheet = cfSheets[0] ?? null
       }
 
       if (!pnlSheet) throw new Error('No P&L sheet data returned')
+      if (!bsSheet) throw new Error('No Balance Sheet data returned')
+      if (!cfSheet) throw new Error('No Cash Flow data returned')
 
-      // 3. Parse P&L
+      // 3. Parse all sheets before writing anything.
       const pnl = parsePnl(pnlSheet)
+      if (pnl.rows.length === 0) {
+        throw new Error('P&L parser returned zero rows.')
+      }
+      const byMonth = new Map<string, Set<string>>()
+      for (const row of pnl.rows) {
+        const month = String(row.month)
+        const channel = String(row.channel)
+        if (!byMonth.has(month)) byMonth.set(month, new Set<string>())
+        byMonth.get(month)!.add(channel)
+      }
+      for (const [month, channels] of byMonth.entries()) {
+        if (channels.size !== CHANNELS.length) {
+          const missing = CHANNELS.filter((ch) => !channels.has(ch)).join(', ')
+          throw new Error(`P&L month ${month} is missing expected channels: ${missing}`)
+        }
+      }
 
-      // 4. Upsert P&L
-      const { error: pnlError } = await supabase
-        .from('fin_pnl_monthly')
-        .upsert(pnl.rows, { onConflict: 'month,channel' })
-      if (pnlError) throw new Error(`P&L upsert failed: ${pnlError.message}`)
-
-      let totalRows = pnl.rows.length
-
-      // 5. Parse & upsert Balance Sheet
-      if (bsSheet) {
-        const bsRows = parseSimpleSheet(bsSheet, BS_FIELD_MAP)
-        for (const row of bsRows) {
-          if (row.cash_and_equivalents == null || row.cash_and_equivalents === 0) {
-            const bank = Number(row.bank_accounts_total) || 0
-            const undeposited = Number(row.undeposited_funds_total) || 0
-            if (bank > 0 || undeposited > 0) {
-              row.cash_and_equivalents = round2(bank + undeposited)
-            }
+      const bsRows = parseSimpleSheet(bsSheet, BS_FIELD_MAP)
+      for (const row of bsRows) {
+        if (row.cash_and_equivalents == null || row.cash_and_equivalents === 0) {
+          const bank = Number(row.bank_accounts_total) || 0
+          const undeposited = Number(row.undeposited_funds_total) || 0
+          if (bank > 0 || undeposited > 0) {
+            row.cash_and_equivalents = round2(bank + undeposited)
           }
         }
-        if (bsRows.length > 0) {
-          const { error: bsError } = await supabase
-            .from('fin_balance_sheet_monthly')
-            .upsert(bsRows, { onConflict: 'month' })
-          if (bsError) throw new Error(`Balance sheet upsert failed: ${bsError.message}`)
-          totalRows += bsRows.length
-        }
       }
+      validateRequiredFields(
+        'Balance Sheet',
+        bsRows,
+        ['cash_and_equivalents', 'bank_accounts_total', 'total_assets'],
+      )
 
-      // 6. Parse & upsert Cash Flow
-      if (cfSheet) {
-        const cfRows = parseSimpleSheet(cfSheet, CF_FIELD_MAP)
-        if (cfRows.length > 0) {
-          const { error: cfError } = await supabase
-            .from('fin_cashflow_monthly')
-            .upsert(cfRows, { onConflict: 'month' })
-          if (cfError) throw new Error(`Cash flow upsert failed: ${cfError.message}`)
-          totalRows += cfRows.length
-        }
-      }
+      const cfRows = parseSimpleSheet(cfSheet, CF_FIELD_MAP)
+      validateRequiredFields(
+        'Cash Flow',
+        cfRows,
+        ['ending_cash', 'net_cash_flow', 'starting_cash'],
+      )
 
-      // 7. Log warnings / unrecognized items
+      // 4. Apply all parsed rows atomically.
+      const { data: applyResult, error: applyError } = await supabase
+        .rpc('apply_finaloop_sync', {
+          p_pnl_rows: pnl.rows,
+          p_bs_rows: bsRows,
+          p_cf_rows: cfRows,
+        })
+      if (applyError) throw new Error(`apply_finaloop_sync failed: ${applyError.message}`)
+
+      const applyCounts = (applyResult ?? {}) as { total_rows?: number }
+      const totalRows = Number(applyCounts.total_rows) ||
+        (pnl.rows.length + bsRows.length + cfRows.length)
+
+      // 5. Log warnings / unrecognized items / unparsed cells
       const notes: string[] = []
       if (pnl.warnings.length > 0) notes.push('Reconciliation: ' + pnl.warnings.join('; '))
       if (pnl.unrecognized.length > 0) {
-        notes.push('Unrecognized line items: ' + pnl.unrecognized.join(', '))
+        notes.push(
+          'Unrecognized line items: ' +
+          pnl.unrecognized
+            .map((entry) => `${entry.lineItem} (${entry.total})`)
+            .join(', '),
+        )
       }
+      const unparsed = getUnparsedCells()
+      if (unparsed.length > 0) {
+        notes.push(
+          `${unparsed.length} cell(s) could not be parsed as numbers: ` +
+          unparsed.slice(0, 5).map((c) => `R${c.row}C${c.col}="${c.raw}"`).join(', ') +
+          (unparsed.length > 5 ? ` (+${unparsed.length - 5} more)` : ''),
+        )
+      }
+      const status = pnl.warnings.length > 0 || pnl.unrecognized.length > 0 || unparsed.length > 0
+        ? 'partial'
+        : 'success'
 
       await supabase.from('fin_sync_log').update({
-        status: pnl.warnings.length > 0 ? 'partial' : 'success',
+        status,
         completed_at: new Date().toISOString(),
         rows_synced: totalRows,
         error_message: notes.length > 0 ? notes.join(' | ') : null,
@@ -863,6 +981,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
+          status,
           rows: totalRows,
           warnings: pnl.warnings,
           unrecognized: pnl.unrecognized,
@@ -871,14 +990,18 @@ Deno.serve(async (req) => {
       )
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
-      if (attempt === MAX_ATTEMPTS) {
+      const noRetry =
+        error instanceof NonRetryableError ||
+        error instanceof SheetConfigError
+      if (noRetry || attempt === MAX_ATTEMPTS) {
         await supabase.from('fin_sync_log').update({
           status: 'error',
           completed_at: new Date().toISOString(),
           error_message: message,
         }).eq('id', syncId)
+        const httpStatus = error instanceof SheetConfigError ? 400 : 500
         return new Response(JSON.stringify({ error: message }), {
-          status: 500,
+          status: httpStatus,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }

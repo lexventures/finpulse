@@ -11,7 +11,6 @@ import {
   formatCompact,
   formatCurrency,
   formatCount,
-  formatPercent,
 } from '@/lib/utils/format'
 
 function formatMonthLabel(dateStr: string): string {
@@ -30,8 +29,8 @@ export default async function InventoryPage() {
         .order('month', { ascending: false })
         .limit(12),
       supabase
-        .from('fin_pnl_monthly')
-        .select('*')
+        .from('fin_kpi_monthly')
+        .select('month, cogs, net_revenue, is_partial')
         .eq('channel', 'company')
         .order('month', { ascending: false })
         .limit(12),

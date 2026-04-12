@@ -64,7 +64,7 @@ async function computeMetric(
   switch (key) {
     case 'gross_margin_pct': {
       const { data } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('gross_margin_pct')
         .eq('channel', 'company')
         .order('month', { ascending: false })
@@ -74,7 +74,7 @@ async function computeMetric(
 
     case 'gross_margin_trend': {
       const { data } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('gross_margin_pct')
         .eq('channel', 'company')
         .order('month', { ascending: false })
@@ -91,7 +91,7 @@ async function computeMetric(
           .order('month', { ascending: false })
           .limit(1),
         supabase
-          .from('fin_pnl_monthly')
+          .from('fin_kpi_monthly')
           .select('total_opex')
           .eq('channel', 'company')
           .order('month', { ascending: false })
@@ -111,7 +111,7 @@ async function computeMetric(
 
     case 'blended_cac': {
       const { data } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('allocated_ad_spend')
         .eq('channel', 'company')
         .order('month', { ascending: false })
@@ -138,7 +138,7 @@ async function computeMetric(
       if (cac === null || cac <= 0) return { value: null }
 
       const { data: pnl } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('net_revenue, gross_margin_pct')
         .eq('channel', 'dtc')
         .order('month', { ascending: false })
@@ -171,7 +171,7 @@ async function computeMetric(
 
     case 'channel_max_pct': {
       const { data } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('channel, net_revenue, month')
         .neq('channel', 'company')
         .neq('channel', 'wholesale')
@@ -198,7 +198,7 @@ async function computeMetric(
           .order('month', { ascending: false })
           .limit(12),
         supabase
-          .from('fin_pnl_monthly')
+          .from('fin_kpi_monthly')
           .select('cogs')
           .eq('channel', 'company')
           .order('month', { ascending: false })
@@ -222,7 +222,7 @@ async function computeMetric(
 
     case 'labor_pct': {
       const { data } = await supabase
-        .from('fin_pnl_monthly')
+        .from('fin_kpi_monthly')
         .select('payroll, net_revenue')
         .eq('channel', 'company')
         .order('month', { ascending: false })
