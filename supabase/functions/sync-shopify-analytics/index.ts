@@ -137,6 +137,7 @@ Deno.serve(async (req) => {
         await sleep(RETRY_DELAYS[attempt - 2])
       }
 
+      // 1. Sales + sessions analytics (existing)
       const salesQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, orders, sessions, conversion_rate TIMESERIES day SINCE -${days}d UNTIL today`
 
       const result = await shopifyGraphQL<ShopifyQLResult>(
@@ -147,56 +148,147 @@ Deno.serve(async (req) => {
         throw new Error(`ShopifyQL parse errors: ${JSON.stringify(result.shopifyqlQuery.parseErrors)}`)
       }
 
+      let analyticsRows = 0
       const tableData = result.shopifyqlQuery.tableData
-      if (!tableData?.rows?.length) {
-        await supabase.from('fin_sync_log').update({
-          status: 'success', completed_at: new Date().toISOString(), rows_synced: 0,
-        }).eq('id', syncId)
-        return new Response(JSON.stringify({ success: true, rows: 0 }), {
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
+      if (tableData?.rows?.length) {
+        const upsertData = tableData.rows
+          .filter((row) => row.day)
+          .map((row) => ({
+            date: row.day,
+            store: 'emilylex',
+            net_sales: round(parseFloat(row.net_sales ?? '0')),
+            gross_sales: round(parseFloat(row.gross_sales ?? '0')),
+            total_sales: round(parseFloat(row.net_sales ?? '0')),
+            discounts: 0,
+            returns: 0,
+            shipping: 0,
+            taxes: 0,
+            orders: parseInt(row.orders ?? '0', 10),
+            sessions: parseInt(row.sessions ?? '0', 10),
+            conversion_rate: round(parseFloat(row.conversion_rate ?? '0'), 4),
+            cart_abandonment_rate: 0,
+            synced_at: new Date().toISOString(),
+          }))
+
+        for (let i = 0; i < upsertData.length; i += 500) {
+          const chunk = upsertData.slice(i, i + 500)
+          const { error } = await supabase
+            .from('fin_shopify_analytics')
+            .upsert(chunk, { onConflict: 'date,store' })
+          if (error) throw new Error(`Upsert failed: ${error.message}`)
+        }
+        analyticsRows = upsertData.length
       }
 
-      const upsertData = tableData.rows
-        .filter((row) => row.day)
-        .map((row) => ({
-          date: row.day,
-          store: 'emilylex',
-          net_sales: round(parseFloat(row.net_sales ?? '0')),
-          gross_sales: round(parseFloat(row.gross_sales ?? '0')),
-          total_sales: round(parseFloat(row.net_sales ?? '0')),
-          discounts: 0,
-          returns: 0,
-          shipping: 0,
-          taxes: 0,
-          orders: parseInt(row.orders ?? '0', 10),
-          sessions: parseInt(row.sessions ?? '0', 10),
-          conversion_rate: round(parseFloat(row.conversion_rate ?? '0'), 4),
-          cart_abandonment_rate: 0,
-          synced_at: new Date().toISOString(),
-        }))
+      // 2. New / returning customer counts via ShopifyQL (DTC store)
+      let customerRows = 0
+      const customerQL = `FROM customers SHOW new_customers, returning_customers TIMESERIES month SINCE -${days}d UNTIL today`
+      try {
+        const custResult = await shopifyGraphQL<ShopifyQLResult>(
+          shop, accessToken, SHOPIFYQL_QUERY, { query: customerQL },
+        )
+        if (!custResult.shopifyqlQuery.parseErrors?.length) {
+          const custData = custResult.shopifyqlQuery.tableData
+          if (custData?.rows?.length) {
+            for (const row of custData.rows) {
+              const monthRaw = row.month ?? row.day
+              if (!monthRaw) continue
+              const monthDate = monthRaw.length > 7 ? monthRaw.slice(0, 7) + '-01' : monthRaw + '-01'
 
-      for (let i = 0; i < upsertData.length; i += 500) {
-        const chunk = upsertData.slice(i, i + 500)
-        const { error } = await supabase
-          .from('fin_shopify_analytics')
-          .upsert(chunk, { onConflict: 'date,store' })
-        if (error) throw new Error(`Upsert failed: ${error.message}`)
+              const newCusts = parseInt(row.new_customers ?? '0', 10)
+              const retCusts = parseInt(row.returning_customers ?? '0', 10)
+
+              const { error } = await supabase
+                .from('fin_kpi_monthly')
+                .update({
+                  new_customer_orders: newCusts,
+                  returning_customer_orders: retCusts,
+                })
+                .eq('month', monthDate)
+                .eq('channel', 'dtc')
+              if (!error) customerRows++
+            }
+          }
+        }
+      } catch {
+        // Non-fatal: customer counts are supplementary
       }
 
+      // 3. Wholesale store customer counts (if configured)
+      const wholesaleShop = Deno.env.get('SHOPIFY_WHOLESALE_SHOP') || 'elsw.myshopify.com'
+      let wholesaleToken: string | null = null
+      if (wholesaleShop !== shop) {
+        const { data: wsSession } = await supabase
+          .from('shopify_sessions')
+          .select('access_token')
+          .eq('id', `offline_${wholesaleShop}`)
+          .eq('shop', wholesaleShop)
+          .maybeSingle()
+        wholesaleToken = wsSession?.access_token ?? null
+
+        if (!wholesaleToken) {
+          const clientId = Deno.env.get('SHOPIFY_CLIENT_ID')
+          const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET')
+          if (clientId && clientSecret) {
+            try {
+              const tokenRes = await fetch(`https://${wholesaleShop}/admin/oauth/access_token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+              })
+              if (tokenRes.ok) {
+                const tokenData = await tokenRes.json()
+                wholesaleToken = tokenData.access_token ?? null
+              }
+            } catch { /* non-fatal */ }
+          }
+        }
+      }
+
+      if (wholesaleToken) {
+        try {
+          const wsCustResult = await shopifyGraphQL<ShopifyQLResult>(
+            wholesaleShop, wholesaleToken, SHOPIFYQL_QUERY, { query: customerQL },
+          )
+          if (!wsCustResult.shopifyqlQuery.parseErrors?.length) {
+            const wsCustData = wsCustResult.shopifyqlQuery.tableData
+            if (wsCustData?.rows?.length) {
+              for (const row of wsCustData.rows) {
+                const monthRaw = row.month ?? row.day
+                if (!monthRaw) continue
+                const monthDate = monthRaw.length > 7 ? monthRaw.slice(0, 7) + '-01' : monthRaw + '-01'
+
+                const newCusts = parseInt(row.new_customers ?? '0', 10)
+                const retCusts = parseInt(row.returning_customers ?? '0', 10)
+
+                const { error } = await supabase
+                  .from('fin_kpi_monthly')
+                  .update({
+                    new_customer_orders: newCusts,
+                    returning_customer_orders: retCusts,
+                  })
+                  .eq('month', monthDate)
+                  .eq('channel', 'wholesale')
+                if (!error) customerRows++
+              }
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      const totalRows = analyticsRows + customerRows
       await supabase.from('fin_sync_log').update({
         status: 'success',
         completed_at: new Date().toISOString(),
-        rows_synced: upsertData.length,
+        rows_synced: totalRows,
       }).eq('id', syncId)
 
       return new Response(JSON.stringify({
         success: true,
-        rows: upsertData.length,
-        date_range: {
-          from: upsertData[0]?.date ?? null,
-          to: upsertData.at(-1)?.date ?? null,
-        },
+        analytics_rows: analyticsRows,
+        customer_rows: customerRows,
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })

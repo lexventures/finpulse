@@ -137,10 +137,9 @@ export async function buildFactsPacket(): Promise<FactsPacket> {
   const revenueYoyPct =
     pyCompanyRev > 0 ? ((revenueMtd - pyCompanyRev) / pyCompanyRev) * 100 : null
 
-  // Run rate (simplified: latest 3 months average * 12)
   const trailingRevenues = pnlTrailing.map((r) => Number(r.net_revenue) || 0)
   const runRateAnnualized =
-    trailingRevenues.length >= 3
+    trailingRevenues.length > 0
       ? (trailingRevenues.reduce((s, v) => s + v, 0) / trailingRevenues.length) * 12
       : null
 
@@ -154,19 +153,25 @@ export async function buildFactsPacket(): Promise<FactsPacket> {
       ? trailingMargins.reduce((s, v) => s + v, 0) / trailingMargins.length
       : null
 
-  // CAC and LTV — ad spend from Finaloop P&L (monthly), not daily revenue
   const totalAdSpend = Math.abs(Number(companyRow?.allocated_ad_spend) || 0)
-  const totalNewCustomers = dailyMtd.reduce(
-    (sum, d) => sum + (Number(d.new_customer_orders) || 0),
-    0,
+  const dtcNewCustomers = dailyMtd.reduce(
+    (sum, d) => sum + (Number(d.new_customer_orders) || 0), 0,
   )
-  const blendedCac = calcBlendedCac(Math.abs(totalAdSpend), totalNewCustomers)
+  const dtcOrders = dailyMtd.reduce(
+    (sum, d) => sum + (Number(d.order_count) || 0), 0,
+  )
+  const wholesaleOrders = wholesaleMtd.reduce(
+    (sum, d) => sum + (Number(d.order_count) || 0), 0,
+  )
+  const allOrders = dtcOrders + wholesaleOrders
+  const cacDenom = dtcNewCustomers > 0 ? dtcNewCustomers : allOrders
+  const blendedCac = calcBlendedCac(Math.abs(totalAdSpend), cacDenom)
   const ltv = calcSimplifiedLtv(
     revenueMtd,
-    totalNewCustomers,
+    allOrders > 0 ? allOrders : 1,
     grossMarginPct ?? 50,
   )
-  const ltvCacRatio = calcLtvCacRatio(ltv, blendedCac)
+  const ltvCacRatio = allOrders > 0 ? calcLtvCacRatio(ltv, blendedCac) : null
 
   // Email % of DTC - approximate from analytics
   const emailPctOfDtc: number | null = null

@@ -14,7 +14,11 @@ import {
   formatCount,
 } from '@/lib/utils/format'
 import { calcBlendedCac } from '@/lib/calculations/cac'
-import { calcSimplifiedLtv, calcLtvCacRatio } from '@/lib/calculations/ltv'
+import {
+  calcSimplifiedLtv,
+  calcFrequencyLtv,
+  calcLtvCacRatio,
+} from '@/lib/calculations/ltv'
 import { AlertFeedWrapper } from './alert-feed-wrapper'
 import { BriefingCard } from './briefing-card'
 
@@ -127,9 +131,13 @@ export default async function CEOOverviewPage() {
 
   const pnl = pnlResult.data ?? []
   const pnlSpark6 = pnl.slice(0, 6).reverse()
-  const sparklineRunRate = pnlSpark6.map((m) => {
-    const rev = Number(m.net_revenue) || 0
-    return rev * 12
+  const completedSpark = pnl.filter((m) => !m.is_partial)
+  const sparklineRunRate = pnlSpark6.map((_m, idx) => {
+    const windowEnd = pnlSpark6.length - idx
+    const trailSlice = completedSpark.slice(0, Math.max(3, windowEnd))
+    if (trailSlice.length === 0) return 0
+    const avg = trailSlice.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) / trailSlice.length
+    return avg * 12
   })
   const sparklineRevenueMtd = pnlSpark6.map((m) => Number(m.net_revenue) || 0)
   const sparklineGrossMargin = pnlSpark6.map((m) => Number(m.gross_margin_pct) || 0)
@@ -149,8 +157,17 @@ export default async function CEOOverviewPage() {
   const cashflowLatest = cashflowRows[0]
 
   const latest = pnl[0]
-  const priorYear = pnl.length >= 13 ? pnl[12] : null
   const latestMonth = latest?.month
+  const priorYearMonth = latestMonth
+    ? (() => {
+        const d = new Date(String(latestMonth) + 'T00:00:00')
+        d.setFullYear(d.getFullYear() - 1)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+      })()
+    : null
+  const priorYear = priorYearMonth
+    ? pnl.find((r) => String(r.month) === priorYearMonth) ?? null
+    : null
 
   const latestRevenue = latest ? Number(latest.net_revenue) || 0 : null
   const priorRevenue = priorYear ? Number(priorYear.net_revenue) || 0 : null
@@ -183,13 +200,13 @@ export default async function CEOOverviewPage() {
   let runRateMethod = ''
   if (trailing12Count >= 12 && seasonalIndices.size === 12) {
     const latestMo = latest ? new Date(String(latest.month) + 'T00:00:00').getMonth() : -1
-    const currentIdx = seasonalIndices.get(latestMo) ?? (1 / 12)
+    const rawIdx = seasonalIndices.get(latestMo) ?? (1 / 12)
+    const currentIdx = Math.max(1 / 24, Math.min(1 / 6, rawIdx))
     const baseMonthRevenue = proratedLatestRevenue ?? 0
-    runRate = currentIdx > 0 ? baseMonthRevenue / currentIdx : trailing12Sum
+    runRate = baseMonthRevenue / currentIdx
     runRateMethod = 'seasonally adjusted'
   } else if (trailing12Count >= 3) {
-    const avgMonthly = trailing12Sum / trailing12Count
-    runRate = avgMonthly * 12
+    runRate = (trailing12Sum / trailing12Count) * 12
     runRateMethod = `${trailing12Count}mo avg × 12`
   } else if (proratedLatestRevenue !== null) {
     runRate = proratedLatestRevenue * 12
@@ -271,7 +288,7 @@ export default async function CEOOverviewPage() {
     (balance ? Number(balance.cash_and_equivalents) || null : null) ??
     (cashflowLatest ? Number(cashflowLatest.ending_cash) || null : null) ??
     forecastStartCash
-  const recentOpex = pnl.slice(0, 3)
+  const recentOpex = pnl.filter((m) => !m.is_partial).slice(0, 3)
   const avgOpex =
     recentOpex.length > 0
       ? recentOpex.reduce((s, m) => s + (Number(m.total_opex) || 0), 0) /
@@ -331,24 +348,35 @@ export default async function CEOOverviewPage() {
       ? Number((grossMargin - threeMonthAvg).toFixed(1))
       : null
 
-  // Blended CAC (ad spend from Finaloop / orders from Shopify daily)
+  // Blended CAC — use all-channel orders, not just DTC
   const adSpend = latest ? Number(latest.allocated_ad_spend) || 0 : 0
   const latestMonthKey = latest ? String(latest.month).slice(0, 7) : null
-  const monthOrders = latestMonthKey
-    ? revenueDaily
-        .filter((d) => String(d.date).slice(0, 7) === latestMonthKey)
+  const dtcMonthOrders = latestMonthKey
+    ? revenueDaily.filter((d) => String(d.date).slice(0, 7) === latestMonthKey)
     : []
-  const newCustomers = monthOrders.reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
-  const totalOrders = monthOrders.reduce((s, d) => s + (Number(d.order_count) || 0), 0)
-  const cacDenominator = newCustomers > 0 ? newCustomers : totalOrders
+  const dtcNewCustomers = dtcMonthOrders.reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
+  const dtcTotalOrders = dtcMonthOrders.reduce((s, d) => s + (Number(d.order_count) || 0), 0)
+
+  let wholesaleTotalOrders = 0
+  if (latestMonthKey) {
+    for (const row of wholesaleDaily) {
+      if (String(row.date).slice(0, 7) === latestMonthKey) {
+        wholesaleTotalOrders += Number(row.order_count) || 0
+      }
+    }
+  }
+
+  const allChannelOrders = dtcTotalOrders + wholesaleTotalOrders
+  const cacDenominator = dtcNewCustomers > 0 ? dtcNewCustomers : allChannelOrders
   const blendedCac = calcBlendedCac(Math.abs(adSpend), cacDenominator)
 
+  // Blended LTV — match scope: company revenue / all-channel orders
   const ltv = calcSimplifiedLtv(
     latestRevenue ?? 0,
-    newCustomers > 0 ? newCustomers : cacDenominator,
+    allChannelOrders > 0 ? allChannelOrders : 1,
     grossMargin ?? 50,
   )
-  const ltvCacRatio = calcLtvCacRatio(ltv, blendedCac)
+  const ltvCacRatio = allChannelOrders > 0 ? calcLtvCacRatio(ltv, blendedCac) : null
 
   // Per-channel CAC / LTV breakout
   interface ChannelCacLtv {
@@ -422,8 +450,8 @@ export default async function CEOOverviewPage() {
     let chOrders = 0
     let hasOrderData = false
     if (key === 'dtc') {
-      chOrders = newCustomers > 0 ? newCustomers : totalOrders
-      hasOrderData = true
+      chOrders = dtcTotalOrders
+      hasOrderData = chOrders > 0
     } else if (key === 'wholesale_faire' || key === 'wholesale_direct') {
       chOrders = wholesaleMonthOrders.get(key) ?? 0
       hasOrderData = chOrders > 0
@@ -576,14 +604,13 @@ export default async function CEOOverviewPage() {
     const pPyKey = `${pPyDate.getFullYear()}-${String(pPyDate.getMonth() + 1).padStart(2, '0')}-01`
     const pPyRow = pnl.find((p) => String(p.month) === pPyKey)
     const pPy = pPyRow ? Number(pPyRow.net_revenue) || 0 : 0
-    const pYoyPct = pPy > 0 ? ((partialRev - pPy) / pPy) * 100 : null
     const lastCompleteRev = last12.length > 0 ? Number(last12[last12.length - 1].net_revenue) || 0 : 0
     const pMomPct = lastCompleteRev > 0 ? ((partialRev - lastCompleteRev) / lastCompleteRev) * 100 : null
     revenueTrend.push({
       month: formatMonthLabel(pMonthStr) + '*',
       revenue: partialRev,
       priorYear: pPy,
-      yoyPct: pYoyPct,
+      yoyPct: null,
       momPct: pMomPct,
       isPartial: true,
     })

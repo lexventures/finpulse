@@ -106,14 +106,13 @@ Deno.serve(async (req) => {
       startingCash = cfRow ? Number(cfRow.ending_cash) || 0 : 0
     }
 
-    // 2. Monthly inflows by channel (latest month's net_revenue per channel)
+    // 2. Monthly inflows by channel — 3-month trailing average (completed months only)
     const { data: channelRows } = await supabase
       .from('fin_kpi_monthly')
-      .select('channel, net_revenue, month')
+      .select('channel, net_revenue, month, is_partial')
       .neq('channel', 'company')
       .order('month', { ascending: false })
 
-    const latestMonth = channelRows?.[0]?.month ?? null
     const inflowChannels: Record<string, number> = {
       dtc: 0,
       wholesale_faire: 0,
@@ -123,13 +122,23 @@ Deno.serve(async (req) => {
       marketplace: 0,
     }
 
-    if (latestMonth && channelRows) {
-      for (const row of channelRows) {
-        if (row.month !== latestMonth) break
+    if (channelRows && channelRows.length > 0) {
+      const completedRows = channelRows.filter((r) => !r.is_partial)
+      const channelMonths = new Map<string, number[]>()
+      for (const ch of Object.keys(inflowChannels)) {
+        channelMonths.set(ch, [])
+      }
+      for (const row of completedRows) {
         const ch = row.channel as string
-        if (ch in inflowChannels) {
-          inflowChannels[ch] = Math.max(0, Number(row.net_revenue) || 0)
+        const arr = channelMonths.get(ch)
+        if (arr && arr.length < 3) {
+          arr.push(Math.max(0, Number(row.net_revenue) || 0))
         }
+      }
+      for (const [ch, values] of channelMonths) {
+        inflowChannels[ch] = values.length > 0
+          ? values.reduce((s, v) => s + v, 0) / values.length
+          : 0
       }
     }
 
@@ -167,7 +176,8 @@ Deno.serve(async (req) => {
       other: otherOpex,
     }
 
-    // 4. Incoming inventory from Shopify
+    // 4. Incoming inventory from Shopify (unpaid POs, separate from Finaloop's
+    // paid inventory_purchases above — these are additive, not overlapping)
     const { data: shopifyRow } = await supabase
       .from('fin_shopify_daily')
       .select('incoming_inventory_value')

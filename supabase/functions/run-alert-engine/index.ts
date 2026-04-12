@@ -110,26 +110,39 @@ async function computeMetric(
     }
 
     case 'blended_cac': {
-      const { data } = await supabase
+      const { data: kpiData } = await supabase
         .from('fin_kpi_monthly')
-        .select('allocated_ad_spend')
+        .select('allocated_ad_spend, month')
         .eq('channel', 'company')
         .order('month', { ascending: false })
         .limit(1)
-      const adSpend = data?.[0]
-        ? Math.abs(Number(data[0].allocated_ad_spend) || 0)
+      const adSpend = kpiData?.[0]
+        ? Math.abs(Number(kpiData[0].allocated_ad_spend) || 0)
         : 0
-      const { data: dailyData } = await supabase
-        .from('fin_revenue_daily')
-        .select('new_customer_orders, date')
-        .eq('channel', 'dtc')
-        .order('date', { ascending: false })
-        .limit(30)
-      const newCusts = (dailyData ?? []).reduce(
-        (s, d) => s + (Number(d.new_customer_orders) || 0),
-        0
-      )
-      return { value: newCusts > 0 ? adSpend / newCusts : null }
+      const latestMonth = kpiData?.[0]?.month as string | undefined
+      if (!latestMonth) return { value: null }
+      const monthKey = String(latestMonth).slice(0, 7)
+
+      const [dtcResult, wsResult] = await Promise.all([
+        supabase
+          .from('fin_revenue_daily')
+          .select('order_count, new_customer_orders')
+          .eq('channel', 'dtc')
+          .gte('date', `${monthKey}-01`)
+          .lt('date', `${monthKey}-32`),
+        supabase
+          .from('fin_wholesale_daily')
+          .select('order_count')
+          .gte('date', `${monthKey}-01`)
+          .lt('date', `${monthKey}-32`),
+      ])
+
+      const dtcOrders = (dtcResult.data ?? []).reduce((s, d) => s + (Number(d.order_count) || 0), 0)
+      const newCusts = (dtcResult.data ?? []).reduce((s, d) => s + (Number(d.new_customer_orders) || 0), 0)
+      const wsOrders = (wsResult.data ?? []).reduce((s, d) => s + (Number(d.order_count) || 0), 0)
+      const allOrders = dtcOrders + wsOrders
+      const denominator = newCusts > 0 ? newCusts : allOrders
+      return { value: denominator > 0 ? adSpend / denominator : null }
     }
 
     case 'ltv_cac_ratio': {
@@ -139,33 +152,39 @@ async function computeMetric(
 
       const { data: pnl } = await supabase
         .from('fin_kpi_monthly')
-        .select('net_revenue, gross_margin_pct')
-        .eq('channel', 'dtc')
+        .select('net_revenue, gross_margin_pct, month')
+        .eq('channel', 'company')
         .order('month', { ascending: false })
         .limit(12)
 
-      const { data: daily } = await supabase
-        .from('fin_revenue_daily')
-        .select('new_customer_orders')
-        .eq('channel', 'dtc')
-        .order('date', { ascending: false })
-        .limit(365)
+      const months = (pnl ?? []).map((r) => String(r.month).slice(0, 7))
+      const minMonth = months.length > 0 ? months[months.length - 1] : null
+
+      const [dtcResult, wsResult] = minMonth ? await Promise.all([
+        supabase
+          .from('fin_revenue_daily')
+          .select('order_count')
+          .eq('channel', 'dtc')
+          .gte('date', `${minMonth}-01`),
+        supabase
+          .from('fin_wholesale_daily')
+          .select('order_count')
+          .gte('date', `${minMonth}-01`),
+      ]) : [{ data: [] }, { data: [] }]
 
       const totalRev = (pnl ?? []).reduce(
-        (s, d) => s + (Number(d.net_revenue) || 0),
-        0
+        (s, d) => s + (Number(d.net_revenue) || 0), 0
       )
-      const totalNew = (daily ?? []).reduce(
-        (s, d) => s + (Number(d.new_customer_orders) || 0),
-        0
-      )
-      const margin =
-        pnl && pnl.length > 0
-          ? Number(pnl[0].gross_margin_pct) || 50
-          : 50
+      const totalOrders =
+        (dtcResult.data ?? []).reduce((s, d) => s + (Number(d.order_count) || 0), 0) +
+        (wsResult.data ?? []).reduce((s, d) => s + (Number(d.order_count) || 0), 0)
+      const margin = pnl && pnl.length > 0
+        ? Number(pnl[0].gross_margin_pct) || 50
+        : 50
 
-      const ltv =
-        totalNew > 0 ? (totalRev / totalNew) * (margin / 100) : null
+      const ltv = totalOrders > 0
+        ? (totalRev / totalOrders) * (margin / 100)
+        : null
       return { value: ltv !== null ? ltv / cac : null }
     }
 

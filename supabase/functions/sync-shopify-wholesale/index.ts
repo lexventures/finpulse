@@ -54,6 +54,22 @@ const SHOPIFYQL_QUERY = `
   }
 `
 
+const ORDERS_BY_SOURCE_QUERY = `
+  query OrdersBySource($query: String!, $cursor: String) {
+    orders(first: 250, query: $query, after: $cursor) {
+      edges {
+        node {
+          id
+          createdAt
+          sourceName
+          totalPriceSet { shopMoney { amount } }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`
+
 interface ShopifyQLResult {
   shopifyqlQuery: {
     tableData?: {
@@ -62,6 +78,29 @@ interface ShopifyQLResult {
     }
     parseErrors?: string[]
   }
+}
+
+interface OrderEdge {
+  node: {
+    id: string
+    createdAt: string
+    sourceName: string | null
+    totalPriceSet: { shopMoney: { amount: string } }
+  }
+}
+
+interface OrdersResult {
+  orders: {
+    edges: OrderEdge[]
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+  }
+}
+
+const FAIRE_SOURCE_PATTERNS = [/faire/i]
+
+function isFaireOrder(sourceName: string | null): boolean {
+  if (!sourceName) return false
+  return FAIRE_SOURCE_PATTERNS.some((p) => p.test(sourceName))
 }
 
 const CORS_HEADERS = {
@@ -138,44 +177,72 @@ Deno.serve(async (req) => {
         await sleep(RETRY_DELAYS[attempt - 2])
       }
 
-      // 1. Sales by source_name (Faire vs Direct segmentation)
-      // ShopifyQL doesn't support source_name as a dimension, so we can't split
-      // Faire vs Direct at this level. All wholesale store sales go to wholesale_direct.
-      // Faire-specific revenue comes from Finaloop P&L (which is authoritative for financials).
-      const salesQL = `FROM sales SHOW day, net_sales, gross_sales, orders, average_order_value TIMESERIES day SINCE -${days}d UNTIL today`
+      // 1. Fetch orders via GraphQL to split Faire vs Direct by sourceName
+      const sinceDate = new Date()
+      sinceDate.setDate(sinceDate.getDate() - days)
+      const sinceISO = sinceDate.toISOString().slice(0, 10)
+      const orderQuery = `created_at:>=${sinceISO}`
 
-      const salesResult = await shopifyGraphQL<ShopifyQLResult>(
-        shop, accessToken, SHOPIFYQL_QUERY, { query: salesQL },
-      )
+      const dailyAgg = new Map<string, { faire: { count: number; revenue: number }; direct: { count: number; revenue: number } }>()
 
-      if (salesResult.shopifyqlQuery.parseErrors?.length) {
-        throw new Error(`ShopifyQL parse errors: ${JSON.stringify(salesResult.shopifyqlQuery.parseErrors)}`)
+      let cursor: string | null = null
+      const MAX_PAGES = 20
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const result = await shopifyGraphQL<OrdersResult>(
+          shop, accessToken, ORDERS_BY_SOURCE_QUERY,
+          { query: orderQuery, cursor },
+        )
+        for (const edge of result.orders.edges) {
+          const date = edge.node.createdAt.slice(0, 10)
+          const amount = parseFloat(edge.node.totalPriceSet.shopMoney.amount) || 0
+          const entry = dailyAgg.get(date) ?? {
+            faire: { count: 0, revenue: 0 },
+            direct: { count: 0, revenue: 0 },
+          }
+          const bucket = isFaireOrder(edge.node.sourceName) ? entry.faire : entry.direct
+          bucket.count++
+          bucket.revenue += amount
+          dailyAgg.set(date, entry)
+        }
+        if (!result.orders.pageInfo.hasNextPage) break
+        cursor = result.orders.pageInfo.endCursor
       }
 
       let wholesaleRows = 0
-      const salesData = salesResult.shopifyqlQuery.tableData
-      if (salesData?.rows?.length) {
-        const upsertData = salesData.rows
-          .filter((row) => row.day)
-          .map((row) => ({
-            date: row.day,
-            segment: 'wholesale_direct' as const,
-            gross_revenue: round(parseFloat(row.gross_sales ?? '0')),
-            net_revenue: round(parseFloat(row.net_sales ?? '0')),
-            order_count: parseInt(row.orders ?? '0', 10),
-            avg_order_value: round(parseFloat(row.average_order_value ?? '0')),
+      const upsertData: Array<Record<string, unknown>> = []
+      for (const [date, agg] of dailyAgg) {
+        if (agg.faire.count > 0) {
+          upsertData.push({
+            date,
+            segment: 'wholesale_faire',
+            gross_revenue: round(agg.faire.revenue),
+            net_revenue: round(agg.faire.revenue),
+            order_count: agg.faire.count,
+            avg_order_value: agg.faire.count > 0 ? round(agg.faire.revenue / agg.faire.count) : 0,
             synced_at: new Date().toISOString(),
-          }))
-
-        for (let i = 0; i < upsertData.length; i += 500) {
-          const chunk = upsertData.slice(i, i + 500)
-          const { error } = await supabase
-            .from('fin_wholesale_daily')
-            .upsert(chunk, { onConflict: 'date,segment' })
-          if (error) throw new Error(`fin_wholesale_daily upsert failed: ${error.message}`)
+          })
         }
-        wholesaleRows = upsertData.length
+        if (agg.direct.count > 0) {
+          upsertData.push({
+            date,
+            segment: 'wholesale_direct',
+            gross_revenue: round(agg.direct.revenue),
+            net_revenue: round(agg.direct.revenue),
+            order_count: agg.direct.count,
+            avg_order_value: agg.direct.count > 0 ? round(agg.direct.revenue / agg.direct.count) : 0,
+            synced_at: new Date().toISOString(),
+          })
+        }
       }
+
+      for (let i = 0; i < upsertData.length; i += 500) {
+        const chunk = upsertData.slice(i, i + 500)
+        const { error } = await supabase
+          .from('fin_wholesale_daily')
+          .upsert(chunk, { onConflict: 'date,segment' })
+        if (error) throw new Error(`fin_wholesale_daily upsert failed: ${error.message}`)
+      }
+      wholesaleRows = upsertData.length
 
       // 2. Sessions/conversion for the wholesale storefront
       const analyticsQL = `FROM sales, sessions SHOW day, net_sales, gross_sales, orders, sessions, conversion_rate TIMESERIES day SINCE -${days}d UNTIL today`
