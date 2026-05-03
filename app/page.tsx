@@ -16,6 +16,7 @@ import { MonthlyCacChart } from '@/components/charts/monthly-cac-chart'
 import { BurnRateChart } from '@/components/charts/burn-rate-chart'
 import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
 import { buildMonthlyDtcCacTrend, type MonthlyCacInput } from '@/lib/calculations/cac'
+import { formatAsOfYear } from '@/lib/date-labels'
 import { PinUnlockGate } from '@/components/pin-unlock-gate'
 import { getPinGateForPath } from '@/lib/pin-access-server'
 
@@ -86,14 +87,6 @@ function formatWeekLabel(weekNum: number, weekStart: string): string {
   const d = new Date(weekStart + 'T12:00:00Z')
   if (Number.isNaN(d.getTime())) return `Wk ${weekNum}`
   return `Wk ${weekNum} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
-}
-
-function fmtAsOfMonth(month: string | undefined): string {
-  if (!month) return '—'
-  return new Date(month + 'T12:00:00Z').toLocaleDateString('en-US', {
-    month: 'short',
-    year: '2-digit',
-  })
 }
 
 /** Matches run-cash-forecast: balance sheet cash first; CF ending only when BS cash is 0. */
@@ -445,8 +438,8 @@ export default async function DashboardPage() {
               13-Week Cash Flow &middot; Net sales &amp; contribution bridges &middot; AP/AR &middot; Burn &amp; runway
             </p>
             <p className="text-[10px] text-gray-400 mt-1 tabular-nums">
-              As of: P&amp;L {fmtAsOfMonth(latestCompanyPnl?.month)} · Balance sheet{' '}
-              {fmtAsOfMonth(latestBs?.month)} · Cash flow {fmtAsOfMonth(cf[0]?.month)}
+              As of: P&amp;L {formatAsOfYear(latestCompanyPnl?.month)} · Balance sheet{' '}
+              {formatAsOfYear(latestBs?.month)} · Cash flow {formatAsOfYear(cf[0]?.month)}
             </p>
           </div>
           <Link
@@ -466,33 +459,33 @@ export default async function DashboardPage() {
             value={fmtFull(cashPosition)}
             sub={
               cashPosition === 0 && startingCashForForecast > 0
-                ? `BS $0 (${fmtAsOfMonth(latestBs?.month)}); runway/forecast use CF ending ${fmtAsOfMonth(cf[0]?.month)}`
-                : `Balance sheet cash & equivalents (${fmtAsOfMonth(latestBs?.month)})`
+                ? `BS $0 (${formatAsOfYear(latestBs?.month)}); runway/forecast use CF ending ${formatAsOfYear(cf[0]?.month)}`
+                : `Balance sheet cash & equivalents (${formatAsOfYear(latestBs?.month)})`
             }
             color="blue"
           />
           <KpiCard
             label="WEEKLY BURN RATE"
             value={`${fmtFull(weeklyBurnRate)}/wk`}
-            sub={`COGS + opex + other + interest · last 3 completed mo through ${fmtAsOfMonth(companyPnl[0]?.month)}`}
+            sub={`COGS + opex + other + interest · last 3 completed mo through ${formatAsOfYear(companyPnl[0]?.month)}`}
             color="red"
           />
           <KpiCard
             label="RUNWAY"
             value={`${runwayWeeks} weeks`}
-            sub={`${fmtFull(startingCashForForecast)} starting cash (same rule as cash forecast) · burn through ${fmtAsOfMonth(companyPnl[0]?.month)}`}
+            sub={`${fmtFull(startingCashForForecast)} starting cash (same rule as cash forecast) · burn through ${formatAsOfYear(companyPnl[0]?.month)}`}
             color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'}
           />
           <KpiCard
             label="TOTAL AP OUTSTANDING"
             value={fmtFull(totalApOutstanding)}
-            sub={`Finaloop balance sheet AP (${fmtAsOfMonth(latestBs?.month)})`}
+            sub={`Finaloop balance sheet AP (${formatAsOfYear(latestBs?.month)})`}
             color="orange"
           />
           <KpiCard
             label="NET SALES % OF GROSS"
             value={fmtPct(netSalesOfGrossPct)}
-            sub={`net revenue ÷ gross · company P&amp;L ${fmtAsOfMonth(latestCompanyPnl?.month)}`}
+            sub={`net revenue ÷ gross · company P&amp;L ${formatAsOfYear(latestCompanyPnl?.month)}`}
             color="blue"
           />
         </div>
