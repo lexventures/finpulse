@@ -23,7 +23,7 @@ export interface MonthlyCacPoint {
 
 export function buildMonthlyDtcCacTrend(
   rows: MonthlyCacInput[],
-  monthLimit = 18
+  monthLimit = 12
 ): MonthlyCacPoint[] {
   return rows
     .filter((row) => row.channel === 'dtc' && !row.is_partial)
