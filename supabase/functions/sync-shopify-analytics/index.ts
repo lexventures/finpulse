@@ -200,12 +200,12 @@ Deno.serve(async (req) => {
 
               const { error } = await supabase
                 .from('fin_kpi_monthly')
-                .update({
+                .upsert({
+                  month: monthDate,
+                  channel: 'dtc',
                   new_customer_orders: newCusts,
                   returning_customer_orders: retCusts,
-                })
-                .eq('month', monthDate)
-                .eq('channel', 'dtc')
+                }, { onConflict: 'month,channel' })
               if (!error) customerRows++
             }
           }
@@ -263,12 +263,12 @@ Deno.serve(async (req) => {
 
                 const { error } = await supabase
                   .from('fin_kpi_monthly')
-                  .update({
+                  .upsert({
+                    month: monthDate,
+                    channel: 'wholesale',
                     new_customer_orders: newCusts,
                     returning_customer_orders: retCusts,
-                  })
-                  .eq('month', monthDate)
-                  .eq('channel', 'wholesale')
+                  }, { onConflict: 'month,channel' })
                 if (!error) customerRows++
               }
             }
