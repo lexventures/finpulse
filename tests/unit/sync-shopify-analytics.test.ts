@@ -13,4 +13,12 @@ describe('sync-shopify-analytics customer count writes', () => {
     expect(functionSource).toContain("{ onConflict: 'month,channel' }")
     expect(functionSource).not.toContain(".update({\n                  new_customer_orders")
   })
+
+  it('requests an 18-month customer acquisition series and returns customer sync errors', () => {
+    expect(functionSource).toContain("const API_VERSION = '2026-04'")
+    expect(functionSource).toContain("customer_months') ?? '18'")
+    expect(functionSource).toContain('CUSTOMERS_COUNT_QUERY')
+    expect(functionSource).toContain('created_at:>=${monthDate} created_at:<${nextMonthDate}')
+    expect(functionSource).toContain('customer_error: customerError')
+  })
 })

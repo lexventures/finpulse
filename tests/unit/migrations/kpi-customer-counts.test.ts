@@ -15,6 +15,7 @@ describe('preserve KPI customer counts migration', () => {
     expect(sql).toContain('new_customer_orders')
     expect(sql).toContain('returning_customer_orders')
     expect(sql).toMatch(/LEFT\s+JOIN\s+existing_customer_counts\s+ecc/i)
+    expect(sql).toMatch(/DELETE\s+FROM\s+fin_kpi_monthly\s+WHERE\s+true/i)
     expect(sql).not.toMatch(/TRUNCATE\s+TABLE\s+fin_kpi_monthly/i)
   })
 })

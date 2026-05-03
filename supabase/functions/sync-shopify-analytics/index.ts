@@ -1,6 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-const API_VERSION = '2025-10'
+const API_VERSION = '2026-04'
 const RETRY_DELAYS = [1000, 4000, 16000]
 const MAX_ATTEMPTS = 4
 
@@ -54,6 +54,14 @@ const SHOPIFYQL_QUERY = `
   }
 `
 
+const CUSTOMERS_COUNT_QUERY = `
+  query CustomersCount($query: String!) {
+    customersCount(query: $query, limit: null) {
+      count
+    }
+  }
+`
+
 interface ShopifyQLResult {
   shopifyqlQuery: {
     tableData?: {
@@ -62,6 +70,18 @@ interface ShopifyQLResult {
     }
     parseErrors?: string[]
   }
+}
+
+interface CustomersCountResult {
+  customersCount: {
+    count: number
+  }
+}
+
+function monthStartDate(monthOffset: number): string {
+  const now = new Date()
+  const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1))
+  return month.toISOString().slice(0, 10)
 }
 
 const CORS_HEADERS = {
@@ -127,6 +147,7 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url)
   const days = parseInt(url.searchParams.get('days') ?? '90', 10)
+  const customerMonths = parseInt(url.searchParams.get('customer_months') ?? '18', 10)
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -180,38 +201,34 @@ Deno.serve(async (req) => {
         analyticsRows = upsertData.length
       }
 
-      // 2. New / returning customer counts via ShopifyQL (DTC store)
+      // 2. New customer counts via Admin customersCount (DTC store)
       let customerRows = 0
-      const customerQL = `FROM customers SHOW new_customers, returning_customers TIMESERIES month SINCE -${days}d UNTIL today`
+      let customerError: string | null = null
       try {
-        const custResult = await shopifyGraphQL<ShopifyQLResult>(
-          shop, accessToken, SHOPIFYQL_QUERY, { query: customerQL },
-        )
-        if (!custResult.shopifyqlQuery.parseErrors?.length) {
-          const custData = custResult.shopifyqlQuery.tableData
-          if (custData?.rows?.length) {
-            for (const row of custData.rows) {
-              const monthRaw = row.month ?? row.day
-              if (!monthRaw) continue
-              const monthDate = monthRaw.length > 7 ? monthRaw.slice(0, 7) + '-01' : monthRaw + '-01'
+        for (let i = customerMonths - 1; i >= 0; i--) {
+          const monthDate = monthStartDate(-i)
+          const nextMonthDate = monthStartDate(-i + 1)
+          const query = `created_at:>=${monthDate} created_at:<${nextMonthDate}`
+          const countResult = await shopifyGraphQL<CustomersCountResult>(
+            shop,
+            accessToken,
+            CUSTOMERS_COUNT_QUERY,
+            { query },
+          )
+          const newCusts = Number(countResult.customersCount?.count) || 0
 
-              const newCusts = parseInt(row.new_customers ?? '0', 10)
-              const retCusts = parseInt(row.returning_customers ?? '0', 10)
-
-              const { error } = await supabase
-                .from('fin_kpi_monthly')
-                .upsert({
-                  month: monthDate,
-                  channel: 'dtc',
-                  new_customer_orders: newCusts,
-                  returning_customer_orders: retCusts,
-                }, { onConflict: 'month,channel' })
-              if (!error) customerRows++
-            }
-          }
+          const { error } = await supabase
+            .from('fin_kpi_monthly')
+            .upsert({
+              month: monthDate,
+              channel: 'dtc',
+              new_customer_orders: newCusts,
+              returning_customer_orders: 0,
+            }, { onConflict: 'month,channel' })
+          if (!error) customerRows++
         }
-      } catch {
-        // Non-fatal: customer counts are supplementary
+      } catch (error: unknown) {
+        customerError = error instanceof Error ? error.message : String(error)
       }
 
       // 3. Wholesale store customer counts (if configured)
@@ -247,34 +264,30 @@ Deno.serve(async (req) => {
 
       if (wholesaleToken) {
         try {
-          const wsCustResult = await shopifyGraphQL<ShopifyQLResult>(
-            wholesaleShop, wholesaleToken, SHOPIFYQL_QUERY, { query: customerQL },
-          )
-          if (!wsCustResult.shopifyqlQuery.parseErrors?.length) {
-            const wsCustData = wsCustResult.shopifyqlQuery.tableData
-            if (wsCustData?.rows?.length) {
-              for (const row of wsCustData.rows) {
-                const monthRaw = row.month ?? row.day
-                if (!monthRaw) continue
-                const monthDate = monthRaw.length > 7 ? monthRaw.slice(0, 7) + '-01' : monthRaw + '-01'
+          for (let i = customerMonths - 1; i >= 0; i--) {
+            const monthDate = monthStartDate(-i)
+            const nextMonthDate = monthStartDate(-i + 1)
+            const query = `created_at:>=${monthDate} created_at:<${nextMonthDate}`
+            const countResult = await shopifyGraphQL<CustomersCountResult>(
+              wholesaleShop,
+              wholesaleToken,
+              CUSTOMERS_COUNT_QUERY,
+              { query },
+            )
+            const newCusts = Number(countResult.customersCount?.count) || 0
 
-                const newCusts = parseInt(row.new_customers ?? '0', 10)
-                const retCusts = parseInt(row.returning_customers ?? '0', 10)
-
-                const { error } = await supabase
-                  .from('fin_kpi_monthly')
-                  .upsert({
-                    month: monthDate,
-                    channel: 'wholesale',
-                    new_customer_orders: newCusts,
-                    returning_customer_orders: retCusts,
-                  }, { onConflict: 'month,channel' })
-                if (!error) customerRows++
-              }
-            }
+            const { error } = await supabase
+              .from('fin_kpi_monthly')
+              .upsert({
+                month: monthDate,
+                channel: 'wholesale',
+                new_customer_orders: newCusts,
+                returning_customer_orders: 0,
+              }, { onConflict: 'month,channel' })
+            if (!error) customerRows++
           }
-        } catch {
-          // Non-fatal
+        } catch (error: unknown) {
+          customerError = error instanceof Error ? error.message : String(error)
         }
       }
 
@@ -289,6 +302,7 @@ Deno.serve(async (req) => {
         success: true,
         analytics_rows: analyticsRows,
         customer_rows: customerRows,
+        customer_error: customerError,
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
