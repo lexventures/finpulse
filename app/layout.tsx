@@ -1,5 +1,6 @@
 import '@/app/globals.css'
 import { Inter } from 'next/font/google'
+import Script from 'next/script'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ShopifyAuthProvider } from '@/components/shopify-auth-provider'
 
@@ -9,9 +10,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <head>
-        <script
+        <Script
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
           data-api-key={process.env.SHOPIFY_CLIENT_ID || ''}
+          strategy="beforeInteractive"
         />
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">

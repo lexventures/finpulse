@@ -35,6 +35,65 @@ interface TransformedItem {
 const fmtK = (v: number) => '$' + Math.round(v / 1000) + 'k'
 const fmtFull = (v: number) => '$' + v.toLocaleString()
 
+export function transformWaterfallData(data: WaterfallItem[]): TransformedItem[] {
+  return data.reduce<{
+    running: number
+    items: TransformedItem[]
+  }>(
+    (acc, item) => {
+      if (item.isTotal) {
+        const anchor =
+          typeof item.value === 'number' && !Number.isNaN(item.value) ? item.value : acc.running
+
+        return {
+          running: acc.running,
+          items: [
+            ...acc.items,
+            {
+              name: item.name,
+              invisible: 0,
+              positive: 0,
+              negative: 0,
+              total: anchor,
+              rawValue: anchor,
+              isTotal: true,
+            },
+          ],
+        }
+      }
+
+      const base = acc.running
+      const nextRunning = acc.running + item.value
+      const transformed =
+        item.value >= 0
+          ? {
+              name: item.name,
+              invisible: base,
+              positive: item.value,
+              negative: 0,
+              total: 0,
+              rawValue: item.value,
+              isTotal: false,
+            }
+          : {
+              name: item.name,
+              invisible: base + item.value,
+              positive: 0,
+              negative: Math.abs(item.value),
+              total: 0,
+              rawValue: item.value,
+              isTotal: false,
+            }
+
+      return {
+        running: nextRunning,
+        items: [...acc.items, transformed],
+      }
+    },
+    { running: 0, items: [] },
+  ).items
+}
+
 function WaterfallTooltip({ active, payload, label }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
   const item = payload[0]?.payload as TransformedItem | undefined
@@ -48,50 +107,7 @@ function WaterfallTooltip({ active, payload, label }: Record<string, unknown>) {
 }
 
 export function WaterfallChart({ data }: WaterfallChartProps) {
-  const transformed = useMemo(() => {
-    let running = 0
-    return data.map((item): TransformedItem => {
-      if (item.isTotal) {
-        const anchor =
-          typeof item.value === 'number' && !Number.isNaN(item.value) ? item.value : running
-        const result: TransformedItem = {
-          name: item.name,
-          invisible: 0,
-          positive: 0,
-          negative: 0,
-          total: anchor,
-          rawValue: anchor,
-          isTotal: true,
-        }
-        return result
-      }
-
-      const base = running
-      running += item.value
-
-      if (item.value >= 0) {
-        return {
-          name: item.name,
-          invisible: base,
-          positive: item.value,
-          negative: 0,
-          total: 0,
-          rawValue: item.value,
-          isTotal: false,
-        }
-      }
-
-      return {
-        name: item.name,
-        invisible: base + item.value,
-        positive: 0,
-        negative: Math.abs(item.value),
-        total: 0,
-        rawValue: item.value,
-        isTotal: false,
-      }
-    })
-  }, [data])
+  const transformed = useMemo(() => transformWaterfallData(data), [data])
 
   return (
     <ResponsiveContainer width="100%" height={300}>
