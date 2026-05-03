@@ -9,3 +9,4 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ## Learned Workspace Facts
 
 - Dashboard-level AP/AR totals should come from Finaloop balance sheet totals; do not surface individual PO/invoice aging details in the app.
+- Monthly CAC reporting should default to DTC-only: use Finaloop DTC allocated ad spend divided by DTC new_customer_orders, excluding Faire/wholesale_faire, company-level spend, and broad sm_expense unless explicitly requested.
