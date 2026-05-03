@@ -147,6 +147,22 @@ const SOURCE_LOG_KEY: Record<(typeof SOURCES)[number], string> = {
   cash_forecast: 'cash_forecast',
 }
 
+async function postSettings(body: Record<string, unknown>): Promise<Response> {
+  const token = await getShopifySessionToken()
+  if (!token) {
+    throw new Error('Open this app inside Shopify admin to save settings.')
+  }
+
+  return fetch('/api/settings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 export function SettingsTabs({
   syncLogs,
   thresholds,
@@ -671,13 +687,9 @@ function NotificationsForm({
     setSaveError('')
 
     try {
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          alert_digest_email: digestEmail,
-          sync_failure_email: syncEmail,
-        }),
+      const res = await postSettings({
+        alert_digest_email: digestEmail,
+        sync_failure_email: syncEmail,
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
@@ -762,21 +774,17 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
     setSaved(false)
     setSaveError('')
     try {
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          faire_commission_rate: faireRate,
-          faire_monthly_ad_budget: adBudget,
-          key_account_gross_margin: grossMargin,
-          shipping_allocation_method: shippingMethod,
-          finaloop_pnl_sheet_id: pnlSheetId,
-          finaloop_balance_sheet_id: balanceSheetId,
-          finaloop_cashflow_sheet_id: cashflowSheetId,
-          finaloop_pnl_tab: pnlTab,
-          finaloop_balance_sheet_tab: balanceSheetTab,
-          finaloop_cashflow_tab: cashflowTab,
-        }),
+      const res = await postSettings({
+        faire_commission_rate: faireRate,
+        faire_monthly_ad_budget: adBudget,
+        key_account_gross_margin: grossMargin,
+        shipping_allocation_method: shippingMethod,
+        finaloop_pnl_sheet_id: pnlSheetId,
+        finaloop_balance_sheet_id: balanceSheetId,
+        finaloop_cashflow_sheet_id: cashflowSheetId,
+        finaloop_pnl_tab: pnlTab,
+        finaloop_balance_sheet_tab: balanceSheetTab,
+        finaloop_cashflow_tab: cashflowTab,
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
@@ -1125,11 +1133,7 @@ function PinManagement({
     setSavingPages(true)
     setPagesMessage('')
     try {
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin_protected_pages: selectedPages }),
-      })
+      const res = await postSettings({ pin_protected_pages: selectedPages })
       if (!res.ok) throw new Error()
       setPagesMessage('Saved')
     } catch {
