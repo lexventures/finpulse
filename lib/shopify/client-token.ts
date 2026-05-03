@@ -5,7 +5,7 @@
  */
 export async function getShopifySessionToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null
-  const shopify = (window as unknown as { shopify?: { idToken?: () => Promise<string> } }).shopify
+  const shopify = await waitForShopifyBridge()
   if (!shopify?.idToken) return null
   try {
     const token = await shopify.idToken()
@@ -13,4 +13,22 @@ export async function getShopifySessionToken(): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+interface ShopifyBridge {
+  idToken?: () => Promise<string>
+}
+
+function currentShopifyBridge(): ShopifyBridge | undefined {
+  return (window as unknown as { shopify?: ShopifyBridge }).shopify
+}
+
+async function waitForShopifyBridge(): Promise<ShopifyBridge | undefined> {
+  const maxAttempts = 20
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const shopify = currentShopifyBridge()
+    if (shopify?.idToken) return shopify
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return currentShopifyBridge()
 }
