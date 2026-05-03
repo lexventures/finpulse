@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { getShopifySessionToken } from '@/lib/shopify/client-token'
+import { runSyncAll, type SyncAllSource } from '@/lib/sync-all'
 
 interface SyncLog {
   id: string
@@ -178,6 +179,8 @@ export function SettingsTabs({
         {/* Tab 0: Dashboard */}
         <TabsContent value={0}>
           <div className="space-y-4 pt-4">
+            <SyncAllControl />
+
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {SOURCES.map((source) => (
                 <SyncSourceCard
@@ -955,6 +958,140 @@ const PIN_PAGE_OPTIONS = [
   { path: '/', label: 'Dashboard' },
   { path: '/settings', label: 'Settings' },
 ]
+
+interface SyncRequestResult {
+  source: string
+  ok: boolean
+  rows: number
+  status: string
+  message: string
+}
+
+function sourceRowsFromBody(body: Record<string, unknown> | null): number {
+  const result = body?.result
+  if (typeof result !== 'object' || result === null) return 0
+  const rows = (result as Record<string, unknown>).rows
+  return typeof rows === 'number' ? rows : 0
+}
+
+function sourceStatusFromBody(body: Record<string, unknown> | null): string {
+  const result = body?.result
+  if (typeof result !== 'object' || result === null) return 'success'
+  const status = (result as Record<string, unknown>).status
+  return typeof status === 'string' ? status : 'success'
+}
+
+function SyncAllControl() {
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [currentSource, setCurrentSource] = useState<SyncAllSource | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [messageStatus, setMessageStatus] = useState<'success' | 'partial' | 'error' | null>(null)
+
+  async function syncSource(source: SyncAllSource): Promise<SyncRequestResult> {
+    setCurrentSource(source)
+    const token = await getShopifySessionToken()
+    if (!token) {
+      return {
+        source,
+        ok: false,
+        rows: 0,
+        status: 'error',
+        message: 'Open this app inside Shopify admin to run sync.',
+      }
+    }
+
+    const res = await fetch(`/api/sync/${source}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const body = await res.json().catch(() => null) as Record<string, unknown> | null
+
+    if (!res.ok) {
+      return {
+        source,
+        ok: false,
+        rows: 0,
+        status: 'error',
+        message: typeof body?.error === 'string' ? body.error : `Failed (${res.status})`,
+      }
+    }
+
+    const rows = sourceRowsFromBody(body)
+    const status = sourceStatusFromBody(body)
+    return {
+      source,
+      ok: true,
+      rows,
+      status,
+      message: `${SOURCE_LABELS[source]} synced (${rows} rows)`,
+    }
+  }
+
+  async function handleSyncAll() {
+    setSyncingAll(true)
+    setCurrentSource(null)
+    setMessage(null)
+    setMessageStatus(null)
+
+    try {
+      const result = await runSyncAll(syncSource)
+      const totalRows = result.results.reduce((sum, step) => sum + step.rows, 0)
+      const hasPartial = result.results.some((step) => step.status === 'partial')
+
+      if (!result.ok) {
+        const failed = result.results[result.results.length - 1]
+        setMessage(`Sync all stopped at ${SOURCE_LABELS[result.failedSource ?? ''] ?? result.failedSource}: ${failed?.message ?? 'Sync failed'}`)
+        setMessageStatus('error')
+        return
+      }
+
+      setMessage(`Sync all completed — ${totalRows} rows across ${result.results.length} sources`)
+      setMessageStatus(hasPartial ? 'partial' : 'success')
+    } catch {
+      setMessage('Sync all request failed')
+      setMessageStatus('error')
+    } finally {
+      setCurrentSource(null)
+      setSyncingAll(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <CardTitle>Sync All Sources</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Runs Shopify DTC, Shopify Wholesale, Shopify Analytics, then Finaloop. Finaloop rebuilds KPI facts and cash forecast.
+          </p>
+        </div>
+        <Button type="button" onClick={handleSyncAll} disabled={syncingAll}>
+          <RefreshCw className={cn('size-4', syncingAll && 'animate-spin')} />
+          {syncingAll ? 'Syncing All...' : 'Sync All'}
+        </Button>
+      </CardHeader>
+      {(currentSource || message) && (
+        <CardContent className="pt-0">
+          {currentSource && (
+            <p className="text-sm text-muted-foreground">
+              Running {SOURCE_LABELS[currentSource] ?? currentSource}...
+            </p>
+          )}
+          {message && (
+            <p className={cn(
+              'text-sm',
+              messageStatus === 'success' && 'text-emerald-600',
+              messageStatus === 'partial' && 'text-amber-700 dark:text-amber-400',
+              messageStatus === 'error' && 'text-destructive',
+            )}>
+              {message}
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  )
+}
 
 function PinManagement({
   hasPin,
