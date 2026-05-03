@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { Settings } from 'lucide-react'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ForecastComboChart } from '@/components/charts/forecast-combo-chart'
 import {
   BridgeTrendChart,
@@ -13,7 +12,6 @@ import {
 import { WaterfallChart } from '@/components/charts/waterfall-chart'
 import { GroupedBarChart } from '@/components/charts/grouped-bar-chart'
 import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
-import { HorizontalBarChart } from '@/components/charts/horizontal-bar-chart'
 import { BurnRateChart } from '@/components/charts/burn-rate-chart'
 import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
 import { PinUnlockGate } from '@/components/pin-unlock-gate'
@@ -29,18 +27,6 @@ function fmtFull(n: number | null | undefined): string {
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return '0%'
   return n.toFixed(1) + '%'
-}
-
-function daysBetween(a: string, b: Date): number {
-  const d = new Date(a)
-  return Math.max(0, Math.floor((b.getTime() - d.getTime()) / 86_400_000))
-}
-
-function ageBucket(days: number): string {
-  if (days <= 30) return '0-30 days'
-  if (days <= 60) return '31-60 days'
-  if (days <= 90) return '61-90 days'
-  return '90+ days'
 }
 
 interface PnlRow {
@@ -92,29 +78,6 @@ interface ForecastDbRow {
   projected_inflows: number
   projected_outflows: number
   projected_ending_cash: number
-}
-
-interface ApRow {
-  id: string
-  vendor: string
-  po_reference: string | null
-  item_type: string
-  created_at: string
-  amount: number
-}
-
-interface ArRow {
-  id: string
-  customer_name: string
-  channel: string | null
-  terms: string
-  order_id: string
-  order_date: string
-  amount: number
-}
-
-interface ShopifyDaily {
-  incoming_inventory_value: number
 }
 
 function formatWeekLabel(weekNum: number, weekStart: string): string {
@@ -185,7 +148,7 @@ export default async function DashboardPage() {
 
   const supabase = createServiceClient()
 
-  const [pnlRes, bsRes, cfRes, apRes, arRes, sdRes, fcAllRes] = await Promise.all([
+  const [pnlRes, bsRes, cfRes, fcAllRes] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
       .select(
@@ -203,13 +166,6 @@ export default async function DashboardPage() {
       .select('month, net_cash_flow, sales_tax_payments, inventory_purchases, ending_cash')
       .order('month', { ascending: false })
       .limit(24),
-    supabase.from('fin_ap_aging').select('*').order('amount', { ascending: false }),
-    supabase.from('fin_ar_aging').select('*').order('amount', { ascending: false }),
-    supabase
-      .from('fin_shopify_daily')
-      .select('incoming_inventory_value')
-      .order('date', { ascending: false })
-      .limit(1),
     supabase
       .from('fin_cash_forecast')
       .select(
@@ -223,9 +179,6 @@ export default async function DashboardPage() {
   const pnl = (pnlRes.data ?? []) as PnlRow[]
   const bs = (bsRes.data ?? []) as BsRow[]
   const cf = (cfRes.data ?? []) as CfRow[]
-  const apAging = (apRes.data ?? []) as ApRow[]
-  const arAging = (arRes.data ?? []) as ArRow[]
-  const shopifyDaily = (sdRes.data ?? [])[0] as ShopifyDaily | undefined
   const fcAll = (fcAllRes.data ?? []) as ForecastDbRow[]
 
   const latestFcDate = fcAll[0]?.forecast_run_date
@@ -260,7 +213,8 @@ export default async function DashboardPage() {
   const runwayWeeks =
     weeklyBurnRate > 0 ? Math.floor(startingCashForForecast / weeklyBurnRate) : 999
 
-  const totalApOutstanding = apAging.reduce((s, r) => s + Math.abs(r.amount), 0)
+  const totalApOutstanding = Math.abs(Number(latestBs?.accounts_payable) || 0)
+  const totalArOutstanding = Math.abs(Number(latestBs?.accounts_receivable) || 0)
 
   const netSalesOfGrossPct =
     latestCompanyPnl && latestCompanyPnl.gross_revenue > 0
@@ -302,9 +256,8 @@ export default async function DashboardPage() {
   const weeklyCogs = avgCogs / WEEKS_PER_MONTH
   const weeklyTax = avgTaxMonthly / WEEKS_PER_MONTH
   const weeklyInventoryCf = cfInvAvg / WEEKS_PER_MONTH
-  const weeklyPoShopify = (shopifyDaily?.incoming_inventory_value ?? 0) / 13
   const weeklyTotalOutflowFallback =
-    weeklyOperating + weeklyCogs + weeklyTax + weeklyInventoryCf + weeklyPoShopify
+    weeklyOperating + weeklyCogs + weeklyTax + weeklyInventoryCf
 
   let forecastData: Array<{
     label: string
@@ -455,30 +408,6 @@ export default async function DashboardPage() {
   })
   const dangerThreshold = avgMonthlyBurn * 2
 
-  const now = new Date()
-  const apBuckets = new Map<string, number>()
-  for (const item of apAging) {
-    const days = daysBetween(item.created_at, now)
-    const bucket = ageBucket(days)
-    apBuckets.set(bucket, (apBuckets.get(bucket) ?? 0) + Math.abs(item.amount))
-  }
-  const apBucketData = ['0-30 days', '31-60 days', '61-90 days', '90+ days'].map((bucket) => ({
-    bucket,
-    amount: apBuckets.get(bucket) ?? 0,
-  }))
-
-  const arBuckets = new Map<string, number>()
-  const totalArOutstanding = arAging.reduce((s, r) => s + Math.abs(r.amount), 0)
-  for (const item of arAging) {
-    const days = daysBetween(item.order_date, now)
-    const bucket = ageBucket(days)
-    arBuckets.set(bucket, (arBuckets.get(bucket) ?? 0) + Math.abs(item.amount))
-  }
-  const arBucketData = ['0-30 days', '31-60 days', '61-90 days', '90+ days'].map((bucket) => ({
-    bucket,
-    amount: arBuckets.get(bucket) ?? 0,
-  }))
-
   const lowestForecast = Math.min(...forecastData.map((w) => w.projectedEndingCash))
   const netTaxReserve = weeklyTax * 13
   const forecastSourceNote = forecastFromPipeline
@@ -539,7 +468,7 @@ export default async function DashboardPage() {
           <KpiCard
             label="TOTAL AP OUTSTANDING"
             value={fmtFull(totalApOutstanding)}
-            sub="Shopify incoming POs (DTC sync)"
+            sub={`Finaloop balance sheet AP (${fmtAsOfMonth(latestBs?.month)})`}
             color="orange"
           />
           <KpiCard
@@ -681,139 +610,12 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <CardTitle className="text-base">AP Aging (Incl. Unpaid POs)</CardTitle>
-              <p
-                className="text-xl font-bold tabular-nums text-orange-700 sm:text-right shrink-0"
-                aria-label={`Total accounts payable outstanding: ${apAging.length > 0 ? fmtFull(totalApOutstanding) : 'no data'}`}
-              >
-                {apAging.length > 0 ? fmtFull(totalApOutstanding) : '—'}
-              </p>
-            </CardHeader>
-            <CardContent className="p-0">
-              {apAging.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>VENDOR / PO</TableHead>
-                      <TableHead>TYPE</TableHead>
-                      <TableHead className="text-right">AGE</TableHead>
-                      <TableHead className="text-right">AMOUNT</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {apAging.slice(0, 10).map((item) => {
-                      const days = daysBetween(item.created_at, now)
-                      return (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium text-xs">
-                            {item.vendor}
-                            {item.po_reference ? ` (${item.po_reference})` : ''}
-                          </TableCell>
-                          <TableCell className="text-xs">{item.item_type}</TableCell>
-                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>
-                            {days} days
-                          </TableCell>
-                          <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
-                        </TableRow>
-                      )
-                    })}
-                    <TableRow className="bg-muted/50 font-semibold">
-                      <TableCell colSpan={3} className="text-xs">
-                        Total AP Outstanding
-                      </TableCell>
-                      <TableCell className="text-right text-xs">{fmtFull(totalApOutstanding)}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AP aging. Run Shopify DTC sync.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <CardTitle className="text-base">AR Aging (Outstanding Receivables)</CardTitle>
-              <p
-                className="text-xl font-bold tabular-nums text-emerald-700 sm:text-right shrink-0"
-                aria-label={`Total accounts receivable outstanding: ${arAging.length > 0 ? fmtFull(totalArOutstanding) : 'no data'}`}
-              >
-                {arAging.length > 0 ? fmtFull(totalArOutstanding) : '—'}
-              </p>
-            </CardHeader>
-            <CardContent className="p-0">
-              {arAging.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>CUSTOMER / CHANNEL</TableHead>
-                      <TableHead>TERMS</TableHead>
-                      <TableHead className="text-right">AGE</TableHead>
-                      <TableHead className="text-right">AMOUNT</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {arAging.slice(0, 10).map((item) => {
-                      const days = daysBetween(item.order_date, now)
-                      return (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium text-xs">
-                            {item.customer_name}
-                            {item.channel ? ` (${item.channel})` : ''}
-                          </TableCell>
-                          <TableCell className="text-xs">{item.terms}</TableCell>
-                          <TableCell className={`text-right text-xs ${days > 60 ? 'text-red-600 font-semibold' : ''}`}>
-                            {days} days
-                          </TableCell>
-                          <TableCell className="text-right text-xs font-medium">{fmtFull(Math.abs(item.amount))}</TableCell>
-                        </TableRow>
-                      )
-                    })}
-                    <TableRow className="bg-muted/50 font-semibold">
-                      <TableCell colSpan={3} className="text-xs">
-                        Total AR Outstanding
-                      </TableCell>
-                      <TableCell className="text-right text-xs">{fmtFull(totalArOutstanding)}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center px-4">No AR aging. Run Shopify Wholesale sync.</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>AP Aging Buckets</CardTitle>
-              <CardDescription>Payables by aging period.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <HorizontalBarChart data={apBucketData} color="#3b82f6" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>AR Aging Buckets</CardTitle>
-              <CardDescription>Receivables by aging period.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <HorizontalBarChart data={arBucketData} color="#22c55e" />
-            </CardContent>
-          </Card>
-        </div>
-
         <div className={`rounded-xl border p-6 ${summaryColor}`}>
           <h3 className="font-bold text-base mb-2">Cash position summary</h3>
           <p className="text-sm leading-relaxed">
             {forecastSourceNote} Lowest projected week-end balance is {fmtFull(lowestForecast)} (week{' '}
-            {forecastData.findIndex((w) => w.projectedEndingCash === lowestForecast) + 1}). Total AP outstanding is{' '}
-            {fmtFull(totalApOutstanding)} against AR of {fmtFull(totalArOutstanding)}, net payables gap{' '}
+            {forecastData.findIndex((w) => w.projectedEndingCash === lowestForecast) + 1}). Finaloop AP is{' '}
+            {fmtFull(totalApOutstanding)} against Finaloop AR of {fmtFull(totalArOutstanding)}, net payables gap{' '}
             {fmtFull(Math.max(0, totalApOutstanding - totalArOutstanding))}. Tax-related estimate (13 weeks):{' '}
             {fmtFull(netTaxReserve)} at ~{fmtFull(weeklyTax)}/wk when cash flow tax lines are empty (else from Finaloop cash flow).
             Weekly burn {fmtFull(weeklyBurnRate)} implies ~{runwayWeeks} weeks runway at {fmtFull(startingCashForForecast)} starting

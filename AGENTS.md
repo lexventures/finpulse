@@ -3,3 +3,9 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## Learned User Preferences
+
+## Learned Workspace Facts
+
+- Dashboard-level AP/AR totals should come from Finaloop balance sheet totals; do not surface individual PO/invoice aging details in the app.

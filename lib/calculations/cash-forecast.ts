@@ -77,8 +77,7 @@ export function projectCashForecast(
   const weeklyBaseInflow = totalMonthlyInflows / WEEKS_PER_MONTH
   const weeklyBaseOutflow = totalMonthlyOutflows / WEEKS_PER_MONTH
 
-  const weeklyInventoryOutflow =
-    incomingInventoryValue > 0 ? incomingInventoryValue / 13 : 0
+  const weeklyInventoryOutflow = 0
 
   const projections: WeekProjection[] = []
   let balance = startingCash

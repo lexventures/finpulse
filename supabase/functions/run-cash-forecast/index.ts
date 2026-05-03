@@ -176,18 +176,7 @@ Deno.serve(async (req) => {
       other: otherOpex,
     }
 
-    // 4. Incoming inventory from Shopify (unpaid POs, separate from Finaloop's
-    // paid inventory_purchases above — these are additive, not overlapping)
-    const { data: shopifyRow } = await supabase
-      .from('fin_shopify_daily')
-      .select('incoming_inventory_value')
-      .order('date', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    const incomingInventory = Number(shopifyRow?.incoming_inventory_value) || 0
-
-    // 5. Growth rate: trailing 3-month revenue growth
+    // 4. Growth rate: trailing 3-month revenue growth
     let growthRate = 0
     if (companyPnl && companyPnl.length >= 2) {
       const recent = Number(companyPnl[0]?.net_revenue) || 0
@@ -198,14 +187,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 6. Run projection
+    // 5. Run projection
     const today = todayStr()
     const projections = projectCashForecast(
       startingCash,
       inflowChannels,
       outflowCategories,
       growthRate,
-      incomingInventory,
+      0,
     )
 
     if (projections.length === 0) {
@@ -218,7 +207,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    // 7. Build upsert rows with per-channel/category splits
+    // 6. Build upsert rows with per-channel/category splits
     const totalMonthlyInflows = Object.values(inflowChannels).reduce((s, v) => s + v, 0)
     const totalMonthlyOutflows = Object.values(outflowCategories).reduce((s, v) => s + v, 0)
 

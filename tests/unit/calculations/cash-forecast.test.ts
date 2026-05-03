@@ -64,23 +64,17 @@ describe('projectCashForecast', () => {
     expect(rows[12].inflows).toBeGreaterThan(rows[0].inflows)
   })
 
-  it('applies incoming inventory as extra weekly outflows totaling the inventory value', () => {
+  it('does not treat incoming inventory as an extra AP outflow', () => {
     const inventory = 65_000
     const rowsNoInv = projectCashForecast(baseParams({ incomingInventoryValue: 0 }))
     const rowsInv = projectCashForecast(
       baseParams({ incomingInventoryValue: inventory, growthRate: 0 })
     )
 
-    const weeklyInventory = inventory / 13
-    let totalInventoryOutflow = 0
     for (let i = 0; i < rowsInv.length; i++) {
-      expect(rowsInv[i].outflows - rowsNoInv[i].outflows).toBeCloseTo(
-        weeklyInventory,
-        8
-      )
-      totalInventoryOutflow += rowsInv[i].outflows - rowsNoInv[i].outflows
+      expect(rowsInv[i].outflows).toBeCloseTo(rowsNoInv[i].outflows, 8)
+      expect(rowsInv[i].ending_balance).toBeCloseTo(rowsNoInv[i].ending_balance, 8)
     }
-    expect(totalInventoryOutflow).toBeCloseTo(inventory, 5)
   })
 
   it('returns an empty array for invalid inputs', () => {
