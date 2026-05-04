@@ -20,6 +20,12 @@ interface WaterfallItem {
 
 interface WaterfallChartProps {
   data: WaterfallItem[]
+  /**
+   * Optional zoomed Y-axis domain. Variance bridges should pass a domain
+   * computed from the running totals; snapshot bridges omit it so the axis
+   * defaults to [0, auto].
+   */
+  yDomain?: [number, number]
 }
 
 interface TransformedItem {
@@ -46,7 +52,7 @@ export function transformWaterfallData(data: WaterfallItem[]): TransformedItem[]
           typeof item.value === 'number' && !Number.isNaN(item.value) ? item.value : acc.running
 
         return {
-          running: acc.running,
+          running: anchor,
           items: [
             ...acc.items,
             {
@@ -106,7 +112,7 @@ function WaterfallTooltip({ active, payload, label }: Record<string, unknown>) {
   )
 }
 
-export function WaterfallChart({ data }: WaterfallChartProps) {
+export function WaterfallChart({ data, yDomain }: WaterfallChartProps) {
   const transformed = useMemo(() => transformWaterfallData(data), [data])
 
   return (
@@ -114,7 +120,12 @@ export function WaterfallChart({ data }: WaterfallChartProps) {
       <BarChart data={transformed} margin={{ top: 8, right: 12, bottom: 24, left: 4 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
         <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-45} textAnchor="end" />
-        <YAxis tickFormatter={fmtK} tick={{ fontSize: 12 }} />
+        <YAxis
+          tickFormatter={fmtK}
+          tick={{ fontSize: 12 }}
+          domain={yDomain ?? undefined}
+          allowDataOverflow={yDomain !== undefined}
+        />
         <Tooltip content={<WaterfallTooltip />} />
 
         <Bar dataKey="invisible" stackId="waterfall" fill="transparent" />
