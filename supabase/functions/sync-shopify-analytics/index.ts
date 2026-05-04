@@ -84,6 +84,35 @@ function monthStartDate(monthOffset: number): string {
   return month.toISOString().slice(0, 10)
 }
 
+async function fetchCustomerCohortSpend(
+  shop: string,
+  accessToken: string,
+  monthDate: string,
+  nextMonthDate: string,
+): Promise<number | null> {
+  const cohortSpendQL = `
+    FROM customers
+      SHOW total_amount_spent
+      WHERE customer_added_date >= ${monthDate}
+        AND customer_added_date < ${nextMonthDate}
+  `
+  const result = await shopifyGraphQL<ShopifyQLResult>(
+    shop,
+    accessToken,
+    SHOPIFYQL_QUERY,
+    { query: cohortSpendQL },
+  )
+
+  if (result.shopifyqlQuery.parseErrors?.length) {
+    throw new Error(`ShopifyQL customer LTV parse errors: ${JSON.stringify(result.shopifyqlQuery.parseErrors)}`)
+  }
+
+  const row = result.shopifyqlQuery.tableData?.rows?.[0]
+  if (!row) return null
+  const spend = Number(row.total_amount_spent ?? 0)
+  return Number.isFinite(spend) ? round(spend) : null
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -216,6 +245,25 @@ Deno.serve(async (req) => {
             { query },
           )
           const newCusts = Number(countResult.customersCount?.count) || 0
+          const cohortSpend = await fetchCustomerCohortSpend(
+            shop,
+            accessToken,
+            monthDate,
+            nextMonthDate,
+          )
+          const shopifyLtv = cohortSpend == null || newCusts <= 0
+            ? null
+            : round(cohortSpend / newCusts)
+          const { data: existingKpi } = await supabase
+            .from('fin_kpi_monthly')
+            .select('gross_margin_pct')
+            .eq('month', monthDate)
+            .eq('channel', 'dtc')
+            .maybeSingle()
+          const grossMarginPct = Number(existingKpi?.gross_margin_pct) || 0
+          const grossMarginLtv = shopifyLtv == null || grossMarginPct <= 0
+            ? null
+            : round(shopifyLtv * (grossMarginPct / 100))
 
           const { error } = await supabase
             .from('fin_kpi_monthly')
@@ -224,6 +272,8 @@ Deno.serve(async (req) => {
               channel: 'dtc',
               new_customer_orders: newCusts,
               returning_customer_orders: 0,
+              shopify_ltv_to_date: shopifyLtv,
+              shopify_gross_margin_ltv_to_date: grossMarginLtv,
             }, { onConflict: 'month,channel' })
           if (!error) customerRows++
         }

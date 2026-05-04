@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildMonthlyDtcLtvCacTrend,
   calcLtvCacRatio,
   calcPaybackPeriod,
   calcSimplifiedLtv,
@@ -58,5 +59,71 @@ describe('calcPaybackPeriod', () => {
 
   it('returns null when gross margin yields zero daily margin', () => {
     expect(calcPaybackPeriod(200, 100, 0)).toBeNull()
+  })
+})
+
+describe('buildMonthlyDtcLtvCacTrend', () => {
+  it('builds DTC CAC and Shopify LTV points oldest to newest', () => {
+    const rows = [
+      {
+        month: '2026-03-01',
+        channel: 'dtc',
+        allocated_ad_spend: -12_000,
+        new_customer_orders: 120,
+        gross_margin_pct: 55,
+        shopify_ltv_to_date: 180,
+        shopify_gross_margin_ltv_to_date: null,
+        is_partial: false,
+      },
+      {
+        month: '2026-02-01',
+        channel: 'dtc',
+        allocated_ad_spend: 8_000,
+        new_customer_orders: 0,
+        gross_margin_pct: 50,
+        shopify_ltv_to_date: null,
+        shopify_gross_margin_ltv_to_date: null,
+        is_partial: false,
+      },
+      {
+        month: '2026-03-01',
+        channel: 'wholesale_faire',
+        allocated_ad_spend: 9_000,
+        new_customer_orders: 90,
+        gross_margin_pct: 50,
+        shopify_ltv_to_date: 300,
+        shopify_gross_margin_ltv_to_date: 150,
+        is_partial: false,
+      },
+      {
+        month: '2026-01-01',
+        channel: 'dtc',
+        allocated_ad_spend: 7_000,
+        new_customer_orders: 70,
+        gross_margin_pct: 50,
+        shopify_ltv_to_date: 150,
+        shopify_gross_margin_ltv_to_date: 75,
+        is_partial: true,
+      },
+    ]
+
+    expect(buildMonthlyDtcLtvCacTrend(rows)).toEqual([
+      {
+        month: '2026-02-01',
+        adSpend: 8_000,
+        newCustomers: 0,
+        cac: null,
+        shopifyLtvToDate: null,
+        shopifyGrossMarginLtvToDate: null,
+      },
+      {
+        month: '2026-03-01',
+        adSpend: 12_000,
+        newCustomers: 120,
+        cac: 100,
+        shopifyLtvToDate: 180,
+        shopifyGrossMarginLtvToDate: 99,
+      },
+    ])
   })
 })

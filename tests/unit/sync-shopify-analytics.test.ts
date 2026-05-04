@@ -21,4 +21,14 @@ describe('sync-shopify-analytics customer count writes', () => {
     expect(functionSource).toContain('created_at:>=${monthDate} created_at:<${nextMonthDate}')
     expect(functionSource).toContain('customer_error: customerError')
   })
+
+  it('requests ShopifyQL customer cohort spend and upserts monthly LTV fields', () => {
+    expect(functionSource).toContain('fetchCustomerCohortSpend')
+    expect(functionSource).toContain('FROM customers')
+    expect(functionSource).toContain('total_amount_spent')
+    expect(functionSource).toContain('customer_added_date')
+    expect(functionSource).toContain('shopify_ltv_to_date')
+    expect(functionSource).toContain('shopify_gross_margin_ltv_to_date')
+    expect(functionSource).not.toContain('amountSpent')
+  })
 })

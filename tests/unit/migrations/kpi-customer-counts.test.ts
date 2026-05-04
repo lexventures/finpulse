@@ -19,3 +19,21 @@ describe('preserve KPI customer counts migration', () => {
     expect(sql).not.toMatch(/TRUNCATE\s+TABLE\s+fin_kpi_monthly/i)
   })
 })
+
+const ltvMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/011_shopify_ltv_kpi_columns.sql',
+)
+
+describe('Shopify LTV KPI migration', () => {
+  it('adds and preserves Shopify LTV fields across KPI rebuilds', () => {
+    const sql = readFileSync(ltvMigrationPath, 'utf8')
+
+    expect(sql).toContain('shopify_ltv_to_date')
+    expect(sql).toContain('shopify_gross_margin_ltv_to_date')
+    expect(sql).toContain('existing_shopify_kpis')
+    expect(sql).toMatch(/LEFT\s+JOIN\s+existing_shopify_kpis\s+esk/i)
+    expect(sql).toMatch(/DELETE\s+FROM\s+fin_kpi_monthly\s+WHERE\s+true/i)
+    expect(sql).not.toMatch(/TRUNCATE\s+TABLE\s+fin_kpi_monthly/i)
+  })
+})

@@ -15,7 +15,10 @@ import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
 import { MonthlyCacChart } from '@/components/charts/monthly-cac-chart'
 import { BurnRateChart } from '@/components/charts/burn-rate-chart'
 import { RunwayAreaChart } from '@/components/charts/runway-area-chart'
-import { buildMonthlyDtcCacTrend, type MonthlyCacInput } from '@/lib/calculations/cac'
+import {
+  buildMonthlyDtcLtvCacTrend,
+  type MonthlyLtvCacInput,
+} from '@/lib/calculations/ltv'
 import { formatAsOfYear } from '@/lib/date-labels'
 import { PinUnlockGate } from '@/components/pin-unlock-gate'
 import { getPinGateForPath } from '@/lib/pin-access-server'
@@ -171,7 +174,7 @@ export default async function DashboardPage() {
       .limit(260),
     supabase
       .from('fin_kpi_monthly')
-      .select('month, channel, allocated_ad_spend, new_customer_orders, is_partial')
+      .select('month, channel, allocated_ad_spend, new_customer_orders, gross_margin_pct, shopify_ltv_to_date, shopify_gross_margin_ltv_to_date, is_partial')
       .eq('channel', 'dtc')
       .order('month', { ascending: false })
       .limit(24),
@@ -181,7 +184,7 @@ export default async function DashboardPage() {
   const bs = (bsRes.data ?? []) as BsRow[]
   const cf = (cfRes.data ?? []) as CfRow[]
   const fcAll = (fcAllRes.data ?? []) as ForecastDbRow[]
-  const kpiCacRows = (kpiCacRes.data ?? []) as MonthlyCacInput[]
+  const kpiCacRows = (kpiCacRes.data ?? []) as MonthlyLtvCacInput[]
 
   const latestFcDate = fcAll[0]?.forecast_run_date
   const fcWeeks = latestFcDate
@@ -318,14 +321,21 @@ export default async function DashboardPage() {
       year: '2-digit',
     })
 
-  const monthlyCacPoints = buildMonthlyDtcCacTrend(kpiCacRows)
+  const monthlyCacPoints = buildMonthlyDtcLtvCacTrend(kpiCacRows)
   const monthlyCacData = monthlyCacPoints.map((r) => ({
     month: bridgeMonthLabel(r.month),
     cac: r.cac,
     adSpend: r.adSpend,
     newCustomers: r.newCustomers,
+    shopifyLtvToDate: r.shopifyLtvToDate,
+    shopifyGrossMarginLtvToDate: r.shopifyGrossMarginLtvToDate,
   }))
-  const hasMonthlyCac = monthlyCacData.some((r) => r.cac != null)
+  const hasMonthlyCac = monthlyCacData.some(
+    (r) =>
+      r.cac != null ||
+      r.shopifyLtvToDate != null ||
+      r.shopifyGrossMarginLtvToDate != null,
+  )
 
   const netSalesTrendData = bridgeHistoryMonths.map((r) => ({
     month: bridgeMonthLabel(r.month),
@@ -590,9 +600,9 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>DTC CAC trend (monthly)</CardTitle>
+            <CardTitle>DTC CAC and Shopify LTV trend (monthly)</CardTitle>
             <CardDescription>
-              Finaloop DTC allocated ad spend divided by Shopify DTC new customers. Excludes Faire ad spend.
+              CAC vs Shopify customer LTV to date by acquisition cohort. Gross-margin LTV is after COGS.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -600,7 +610,7 @@ export default async function DashboardPage() {
               <MonthlyCacChart data={monthlyCacData} />
             ) : (
               <p className="text-sm text-muted-foreground py-8 text-center">
-                No DTC CAC data. Run Finaloop and Shopify analytics syncs.
+                No DTC CAC or Shopify LTV data. Run Finaloop and Shopify analytics syncs.
               </p>
             )}
           </CardContent>

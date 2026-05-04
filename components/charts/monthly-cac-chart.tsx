@@ -2,6 +2,7 @@
 
 import {
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -15,6 +16,8 @@ interface MonthlyCacChartPoint {
   cac: number | null
   adSpend: number
   newCustomers: number
+  shopifyLtvToDate?: number | null
+  shopifyGrossMarginLtvToDate?: number | null
 }
 
 interface MonthlyCacChartProps {
@@ -39,6 +42,16 @@ function MonthlyCacTooltip({ active, payload, label }: Record<string, unknown>) 
       <p className="mb-1.5 font-medium">{String(label)}</p>
       <div className="space-y-1 font-mono tabular-nums">
         <p>CAC: {point.cac == null ? '—' : fmtCurrency(point.cac)}</p>
+        <p>
+          Shopify LTV to date:{' '}
+          {point.shopifyLtvToDate == null ? '—' : fmtCurrency(point.shopifyLtvToDate)}
+        </p>
+        <p>
+          Gross-margin LTV to date:{' '}
+          {point.shopifyGrossMarginLtvToDate == null
+            ? '—'
+            : fmtCurrency(point.shopifyGrossMarginLtvToDate)}
+        </p>
         <p>Ad spend: {fmtCurrency(point.adSpend)}</p>
         <p>New customers: {point.newCustomers.toLocaleString()}</p>
       </div>
@@ -54,6 +67,7 @@ export function MonthlyCacChart({ data }: MonthlyCacChartProps) {
         <XAxis dataKey="month" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
         <YAxis tickFormatter={fmtCurrency} tick={{ fontSize: 12 }} width={64} />
         <Tooltip content={<MonthlyCacTooltip />} />
+        <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: 12 }} />
         <Line
           type="monotone"
           dataKey="cac"
@@ -62,6 +76,24 @@ export function MonthlyCacChart({ data }: MonthlyCacChartProps) {
           dot={{ r: 3, fill: '#7c3aed' }}
           connectNulls
           name="DTC CAC"
+        />
+        <Line
+          type="monotone"
+          dataKey="shopifyLtvToDate"
+          stroke="#059669"
+          strokeWidth={2.5}
+          dot={{ r: 3, fill: '#059669' }}
+          connectNulls
+          name="Shopify LTV to date"
+        />
+        <Line
+          type="monotone"
+          dataKey="shopifyGrossMarginLtvToDate"
+          stroke="#2563eb"
+          strokeWidth={2.5}
+          dot={{ r: 3, fill: '#2563eb' }}
+          connectNulls
+          name="Gross-margin LTV to date"
         />
       </LineChart>
     </ResponsiveContainer>
