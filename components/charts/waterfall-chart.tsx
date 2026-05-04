@@ -116,10 +116,17 @@ export function WaterfallChart({ data, yDomain }: WaterfallChartProps) {
   const transformed = useMemo(() => transformWaterfallData(data), [data])
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={transformed} margin={{ top: 8, right: 12, bottom: 24, left: 4 }}>
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={transformed} margin={{ top: 8, right: 12, bottom: 48, left: 4 }}>
         <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-45} textAnchor="end" />
+        <XAxis
+          dataKey="name"
+          tick={{ fontSize: 11 }}
+          angle={-35}
+          textAnchor="end"
+          interval={0}
+          height={60}
+        />
         <YAxis
           tickFormatter={fmtK}
           tick={{ fontSize: 12 }}

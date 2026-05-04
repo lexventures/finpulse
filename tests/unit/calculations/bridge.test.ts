@@ -163,16 +163,16 @@ describe('buildContributionVariance', () => {
     )
   })
 
-  it('renders Δ Net revenue, COGS, fees, ads, email anchors plus prior/current', () => {
+  it('renders short driver labels plus prior/current anchors', () => {
     const walk = buildContributionVariance(current, prior)
     const names = walk.steps.map((s) => s.name)
     expect(names[0]).toMatch(/Prior CM/i)
-    expect(names).toContain('Δ Net revenue')
-    expect(names).toContain('Δ COGS')
-    expect(names).toContain('Δ Processing fees')
-    expect(names).toContain('Δ Selling fees')
-    expect(names).toContain('Δ Paid ads')
-    expect(names).toContain('Δ Email marketing')
+    expect(names).toContain('Net rev')
+    expect(names).toContain('COGS')
+    expect(names).toContain('Processing')
+    expect(names).toContain('Selling')
+    expect(names).toContain('Paid ads')
+    expect(names).toContain('Email')
     expect(names[names.length - 1]).toMatch(/Current CM/i)
   })
 })

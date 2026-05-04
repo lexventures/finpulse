@@ -155,10 +155,10 @@ export function buildNetSalesVariance(current: PnlRow, prior: PnlRow): VarianceW
     'Current NR',
     current.net_revenue,
     [
-      { kind: 'gross', label: 'Δ Gross revenue', current: current.gross_revenue, prior: prior.gross_revenue },
-      { kind: 'returns', label: 'Δ Returns', current: current.returns, prior: prior.returns },
-      { kind: 'discounts', label: 'Δ Discounts', current: current.discounts, prior: prior.discounts },
-      { kind: 'shipping', label: 'Δ Shipping income', current: current.shipping_income, prior: prior.shipping_income },
+      { kind: 'gross', label: 'Gross', current: current.gross_revenue, prior: prior.gross_revenue },
+      { kind: 'returns', label: 'Returns', current: current.returns, prior: prior.returns },
+      { kind: 'discounts', label: 'Discounts', current: current.discounts, prior: prior.discounts },
+      { kind: 'shipping', label: 'Shipping', current: current.shipping_income, prior: prior.shipping_income },
     ],
     'net_sales',
   )
@@ -174,12 +174,12 @@ export function buildContributionVariance(current: PnlRow, prior: PnlRow): Varia
     'Current CM',
     current.contribution_margin,
     [
-      { kind: 'nr', label: 'Δ Net revenue', current: current.net_revenue, prior: prior.net_revenue },
-      { kind: 'cogs', label: 'Δ COGS', current: current.cogs, prior: prior.cogs },
-      { kind: 'processing', label: 'Δ Processing fees', current: current.processing_fees, prior: prior.processing_fees },
-      { kind: 'selling', label: 'Δ Selling fees', current: current.selling_fees, prior: prior.selling_fees },
-      { kind: 'ads', label: 'Δ Paid ads', current: current.allocated_ad_spend, prior: prior.allocated_ad_spend },
-      { kind: 'email', label: 'Δ Email marketing', current: current.allocated_email_marketing, prior: prior.allocated_email_marketing },
+      { kind: 'nr', label: 'Net rev', current: current.net_revenue, prior: prior.net_revenue },
+      { kind: 'cogs', label: 'COGS', current: current.cogs, prior: prior.cogs },
+      { kind: 'processing', label: 'Processing', current: current.processing_fees, prior: prior.processing_fees },
+      { kind: 'selling', label: 'Selling', current: current.selling_fees, prior: prior.selling_fees },
+      { kind: 'ads', label: 'Paid ads', current: current.allocated_ad_spend, prior: prior.allocated_ad_spend },
+      { kind: 'email', label: 'Email', current: current.allocated_email_marketing, prior: prior.allocated_email_marketing },
     ],
     'contribution',
   )
