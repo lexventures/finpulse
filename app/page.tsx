@@ -5,11 +5,7 @@ import { Settings } from 'lucide-react'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { ForecastComboChart } from '@/components/charts/forecast-combo-chart'
-import {
-  BridgeTrendChart,
-  type BridgeTrendLineSpec,
-} from '@/components/charts/bridge-trend-chart'
-import { WaterfallChart } from '@/components/charts/waterfall-chart'
+import { BridgeCard, type BridgeCardData } from '@/components/dashboard/bridge-card'
 import { GroupedBarChart } from '@/components/charts/grouped-bar-chart'
 import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
 import { MonthlyCacChart } from '@/components/charts/monthly-cac-chart'
@@ -288,38 +284,17 @@ export default async function DashboardPage() {
     })
   }
 
-  const netSalesBridge = latestCompanyPnl
-    ? [
-        { name: 'Gross revenue', value: latestCompanyPnl.gross_revenue },
-        { name: 'Returns', value: latestCompanyPnl.returns },
-        { name: 'Discounts', value: latestCompanyPnl.discounts },
-        { name: 'Shipping income', value: latestCompanyPnl.shipping_income },
-        { name: 'Net revenue', value: latestCompanyPnl.net_revenue, isTotal: true },
-      ]
-    : []
-
-  const contributionBridge = latestCompanyPnl
-    ? [
-        { name: 'Net revenue', value: latestCompanyPnl.net_revenue },
-        { name: 'COGS', value: latestCompanyPnl.cogs },
-        { name: 'Processing fees', value: latestCompanyPnl.processing_fees },
-        { name: 'Selling fees', value: latestCompanyPnl.selling_fees },
-        { name: 'Paid ads', value: latestCompanyPnl.allocated_ad_spend },
-        { name: 'Email marketing', value: latestCompanyPnl.allocated_email_marketing },
-        {
-          name: 'Contribution margin',
-          value: latestCompanyPnl.contribution_margin,
-          isTotal: true,
-        },
-      ]
-    : []
-
-  const bridgeHistoryMonths = companyPnl.slice(0, 12).reverse()
   const bridgeMonthLabel = (month: string) =>
     new Date(month + 'T12:00:00Z').toLocaleDateString('en-US', {
       month: 'short',
       year: '2-digit',
     })
+
+  const bridgeData: BridgeCardData = {
+    company: pnl.filter((r) => r.channel === 'company'),
+    dtc: pnl.filter((r) => r.channel === 'dtc'),
+    wholesale: pnl.filter((r) => r.channel === 'wholesale'),
+  }
 
   const monthlyCacPoints = buildMonthlyDtcLtvCacTrend(kpiCacRows)
   const monthlyCacData = monthlyCacPoints.map((r) => ({
@@ -336,49 +311,6 @@ export default async function DashboardPage() {
       r.shopifyLtvToDate != null ||
       r.shopifyGrossMarginLtvToDate != null,
   )
-
-  const netSalesTrendData = bridgeHistoryMonths.map((r) => ({
-    month: bridgeMonthLabel(r.month),
-    gross_revenue: r.gross_revenue,
-    returns: r.returns,
-    discounts: r.discounts,
-    shipping_income: r.shipping_income,
-    net_revenue: r.net_revenue,
-  }))
-
-  const contributionTrendData = bridgeHistoryMonths.map((r) => ({
-    month: bridgeMonthLabel(r.month),
-    net_revenue: r.net_revenue,
-    cogs: r.cogs,
-    processing_fees: r.processing_fees,
-    selling_fees: r.selling_fees,
-    allocated_ad_spend: r.allocated_ad_spend,
-    allocated_email_marketing: r.allocated_email_marketing,
-    contribution_margin: r.contribution_margin,
-  }))
-
-  const netSalesBridgeTrendLines: BridgeTrendLineSpec[] = [
-    { dataKey: 'gross_revenue', name: 'Gross revenue', stroke: '#64748b' },
-    { dataKey: 'returns', name: 'Returns', stroke: '#f97316' },
-    { dataKey: 'discounts', name: 'Discounts', stroke: '#ca8a04' },
-    { dataKey: 'shipping_income', name: 'Shipping income', stroke: '#0ea5e9' },
-    { dataKey: 'net_revenue', name: 'Net revenue', stroke: '#2563eb', strokeWidth: 2.5 },
-  ]
-
-  const contributionBridgeTrendLines: BridgeTrendLineSpec[] = [
-    { dataKey: 'net_revenue', name: 'Net revenue', stroke: '#2563eb', strokeWidth: 2 },
-    { dataKey: 'cogs', name: 'COGS', stroke: '#dc2626' },
-    { dataKey: 'processing_fees', name: 'Processing fees', stroke: '#f87171' },
-    { dataKey: 'selling_fees', name: 'Selling fees', stroke: '#b91c1c' },
-    { dataKey: 'allocated_ad_spend', name: 'Paid ads', stroke: '#a855f7' },
-    { dataKey: 'allocated_email_marketing', name: 'Email marketing', stroke: '#7c3aed' },
-    {
-      dataKey: 'contribution_margin',
-      name: 'Contribution margin',
-      stroke: '#059669',
-      strokeWidth: 2.5,
-    },
-  ]
 
   const channelNames: Record<string, string> = {
     dtc: 'Shopify DTC',
@@ -516,52 +448,18 @@ export default async function DashboardPage() {
         </Card>
 
         <div className="grid lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Net sales bridge &mdash; last completed month</CardTitle>
-              <CardDescription>
-                Gross revenue through returns, discounts, and shipping to{' '}
-                <strong>net revenue</strong> (same definition as Finaloop sync).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {netSalesBridge.length > 0 ? (
-                <>
-                  <WaterfallChart data={netSalesBridge} />
-                  <BridgeTrendChart
-                    data={netSalesTrendData}
-                    lines={netSalesBridgeTrendLines}
-                    caption="Historical trend (up to 12 months, same bridge components; net revenue emphasized)"
-                  />
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data. Run a Finaloop sync.</p>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Contribution margin bridge &mdash; last completed month</CardTitle>
-              <CardDescription>
-                From net revenue through COGS, fees, and allocated marketing to{' '}
-                <strong>contribution margin</strong> (Finaloop P&amp;L columns).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {contributionBridge.length > 0 ? (
-                <>
-                  <WaterfallChart data={contributionBridge} />
-                  <BridgeTrendChart
-                    data={contributionTrendData}
-                    lines={contributionBridgeTrendLines}
-                    caption="Historical trend (up to 12 months; contribution margin emphasized)"
-                  />
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground py-8 text-center">No P&amp;L data. Run a Finaloop sync.</p>
-              )}
-            </CardContent>
-          </Card>
+          <BridgeCard
+            bridge="net_sales"
+            title="Net sales bridge"
+            description="What drove net revenue between periods. Gross revenue minus returns and discounts, plus shipping income, lands at net revenue."
+            data={bridgeData}
+          />
+          <BridgeCard
+            bridge="contribution"
+            title="Contribution margin bridge"
+            description="What drove contribution margin between periods. Net revenue less COGS, fees, and allocated marketing lands at contribution margin."
+            data={bridgeData}
+          />
         </div>
 
         <div className="grid md:grid-cols-2 gap-6">
