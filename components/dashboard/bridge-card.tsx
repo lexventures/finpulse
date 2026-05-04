@@ -59,13 +59,12 @@ const PERIOD_LABELS: Record<PeriodKind, string> = {
   snapshot: 'Snapshot',
 }
 
-function fmtCurrency(v: number): string {
-  const sign = v < 0 ? '-' : '+'
+function fmtAmount(v: number): string {
   const abs = Math.abs(v)
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${Math.round(abs / 1_000)}k`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`
-  return `${sign}$${abs.toFixed(0)}`
+  if (abs >= 1_000_000) return `$${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 10_000) return `$${Math.round(abs / 1_000)}k`
+  if (abs >= 1_000) return `$${(abs / 1_000).toFixed(1)}k`
+  return `$${abs.toFixed(0)}`
 }
 
 function fmtMonth(month: string): string {
@@ -75,21 +74,38 @@ function fmtMonth(month: string): string {
   })
 }
 
-function fmtPp(pp: number): string {
-  const sign = pp >= 0 ? '+' : '−'
-  return `${sign}${Math.abs(pp).toFixed(1)}pp`
+const ADDITION_KINDS = new Set(['gross', 'nr', 'shipping'])
+const DENOMINATOR_KINDS = new Set(['gross', 'nr'])
+
+function lineItemDirection(d: VarianceDriver): 'up' | 'down' | 'flat' {
+  if (d.delta === 0) return 'flat'
+  const helped = d.delta > 0
+  // additions move with the delta sign; deductions move opposite
+  // (a more-positive stored value = less negative = lower expense line)
+  if (ADDITION_KINDS.has(d.kind)) return helped ? 'up' : 'down'
+  return helped ? 'down' : 'up'
 }
 
-function describeDriver(d: VarianceDriver): string {
-  const dollars = fmtCurrency(d.delta)
-  const stem = `${d.name.replace(/^Δ\s*/, '')} ${dollars}`
+function describeDriver(d: VarianceDriver, totalLabel: string, isTop: boolean): string {
+  const verb = d.delta < 0 ? 'Hurt' : 'Helped'
+  const rank = isTop ? `${verb} ${totalLabel} most` : `Also ${verb.toLowerCase()} ${totalLabel}`
+  const direction = lineItemDirection(d)
+  const arrow = direction === 'up' ? 'up' : direction === 'down' ? 'down' : 'flat'
+  const stem = `${d.name} ${arrow} ${fmtAmount(d.delta)} MoM`
+  // Suppress rate parenthetical for gross/nr drivers — their rate is the
+  // denominator (always 100%), so "rate 100%, +0.0pp" is noise.
+  if (DENOMINATOR_KINDS.has(d.kind)) {
+    return `${rank}: ${stem}`
+  }
   if (d.rateNow != null && d.ratePoints != null) {
-    return `${stem} (rate ${d.rateNow.toFixed(1)}%, ${fmtPp(d.ratePoints)} vs trailing 3mo)`
+    const pp = Math.abs(d.ratePoints)
+    const ppDirection = d.ratePoints >= 0 ? 'above' : 'below'
+    return `${rank}: ${stem} (${d.rateNow.toFixed(1)}% rate, ${pp.toFixed(1)}pp ${ppDirection} trailing 3mo)`
   }
   if (d.rateNow != null) {
-    return `${stem} (rate ${d.rateNow.toFixed(1)}%)`
+    return `${rank}: ${stem} (${d.rateNow.toFixed(1)}% rate)`
   }
-  return stem
+  return `${rank}: ${stem}`
 }
 
 function selectSeries(data: BridgeCardData, channel: ChannelKey): PnlRow[] {
@@ -305,11 +321,8 @@ export function BridgeCard({
                         (d.isNegativeImpact ? 'bg-[#ef4444]' : 'bg-[#22c55e]')
                       }
                     />
-                    <span className="text-muted-foreground">
-                      <strong className="text-foreground">
-                        {i === 0 ? 'Top driver: ' : 'Next: '}
-                      </strong>
-                      {describeDriver(d)}
+                    <span className="text-foreground">
+                      {describeDriver(d, totalLabel, i === 0)}
                     </span>
                   </li>
                 ))}
