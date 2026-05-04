@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import Script from 'next/script'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ShopifyAuthProvider } from '@/components/shopify-auth-provider'
+import { Toaster } from '@/components/ui/sonner'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <main className="min-h-screen">
               {children}
             </main>
+            <Toaster />
           </TooltipProvider>
         </ShopifyAuthProvider>
       </body>
