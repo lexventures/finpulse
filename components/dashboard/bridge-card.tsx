@@ -7,6 +7,7 @@ import {
   type BridgeTrendAreaSpec,
   type BridgeTrendLineSpec,
 } from '@/components/charts/bridge-trend-chart'
+import { Sparkline } from '@/components/charts/sparkline'
 import { WaterfallChart } from '@/components/charts/waterfall-chart'
 import {
   Card,
@@ -29,6 +30,10 @@ import {
   type PnlRow,
   type VarianceDriver,
 } from '@/lib/calculations/bridge'
+import {
+  composeBridgeHeadline,
+  type BridgeHeadline,
+} from '@/lib/calculations/bridge-headline'
 
 export type ChannelKey = 'company' | 'dtc' | 'wholesale'
 
@@ -171,6 +176,88 @@ function buildRateTrend(rows: PnlRow[], bridge: BridgeKind) {
     .filter((x): x is NonNullable<typeof x> => x !== null)
 }
 
+function HeadlineBlock({
+  headline,
+  totalLabel,
+}: {
+  headline: BridgeHeadline
+  totalLabel: string
+}) {
+  const { primary, badgeLabel: badgeText, insight, action } = headline
+  const deltaSign = primary.delta == null ? 0 : Math.sign(primary.delta)
+  const deltaColor =
+    deltaSign === 0
+      ? 'text-muted-foreground'
+      : deltaSign > 0
+      ? 'text-[#15803d]'
+      : 'text-[#b91c1c]'
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline flex-wrap gap-x-3 gap-y-1">
+        <span className="font-heading text-2xl font-semibold tabular-nums leading-none">
+          {primary.totalLabel}
+        </span>
+        {primary.deltaLabel ? (
+          <span className={`text-sm font-medium tabular-nums ${deltaColor}`}>
+            {primary.deltaLabel}
+          </span>
+        ) : null}
+        {primary.deltaPctLabel ? (
+          <span className={`text-xs tabular-nums ${deltaColor}`}>
+            {primary.deltaPctLabel}
+          </span>
+        ) : null}
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {primary.rateLabel}
+        </span>
+        {badgeText ? (
+          <span
+            className={
+              'rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide tabular-nums ' +
+              (headline.badge === 'best_12mo'
+                ? 'border-[#15803d]/30 bg-[#dcfce7] text-[#166534]'
+                : 'border-[#b91c1c]/30 bg-[#fee2e2] text-[#991b1b]')
+            }
+          >
+            {badgeText}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-3">
+        <Sparkline
+          data={primary.sparkline}
+          width={140}
+          height={28}
+          stroke={
+            headline.badge === 'worst_12mo'
+              ? '#b91c1c'
+              : headline.badge === 'best_12mo'
+              ? '#15803d'
+              : '#475569'
+          }
+          className="text-muted-foreground"
+        />
+        <span className="text-[11px] text-muted-foreground tabular-nums">
+          {primary.periodPhrase
+            ? `${primary.periodPhrase} · ${primary.priorMonthLabel} → ${primary.monthLabel}`
+            : `${primary.monthLabel} snapshot`}
+        </span>
+      </div>
+      {insight ? (
+        <p className="text-sm text-foreground leading-snug">{insight}</p>
+      ) : null}
+      {action ? (
+        <p className="text-xs text-muted-foreground border-l-2 border-border pl-2 italic">
+          Investigate: {action}
+        </p>
+      ) : (
+        <p className="sr-only">No action recommended for {totalLabel}.</p>
+      )}
+    </div>
+  )
+}
+
 interface ToggleGroupProps<T extends string> {
   label: string
   value: T
@@ -241,8 +328,15 @@ export function BridgeCard({
 
   const drivers = useMemo<VarianceDriver[]>(() => {
     if (!variance || 'error' in variance || !variance.walk) return []
-    return topVarianceDrivers(variance.walk, series, bridge, 2)
+    // Pull more drivers than we surface in the supporting detail; the
+    // headline composer applies its own threshold filtering.
+    return topVarianceDrivers(variance.walk, series, bridge, 8)
   }, [bridge, series, variance])
+
+  const topDrivers = useMemo<VarianceDriver[]>(
+    () => drivers.slice(0, 2),
+    [drivers],
+  )
 
   const snapshotSteps = useMemo(() => {
     if (!current) return []
@@ -252,6 +346,20 @@ export function BridgeCard({
   }, [bridge, current])
 
   const rateTrend = useMemo(() => buildRateTrend(series, bridge), [bridge, series])
+
+  const headline = useMemo<BridgeHeadline | null>(() => {
+    if (!current) return null
+    const priorRow =
+      variance && 'walk' in variance && variance.walk ? variance.walk.prior : null
+    return composeBridgeHeadline({
+      bridge,
+      current,
+      prior: priorRow,
+      series,
+      drivers,
+      periodKind: period,
+    })
+  }, [bridge, current, drivers, period, series, variance])
 
   const showingVariance = variance && 'walk' in variance && variance.walk
   const denominatorLabel = bridge === 'net_sales' ? 'gross revenue' : 'net revenue'
@@ -300,66 +408,75 @@ export function BridgeCard({
           <p className="text-sm text-muted-foreground py-8 text-center">
             No P&amp;L data for {CHANNEL_LABELS[channel]}. Run a Finaloop sync.
           </p>
-        ) : showingVariance ? (
-          <>
-            <p className="text-[11px] text-muted-foreground mb-1 tabular-nums">
-              {period === 'mom' ? 'Month over month' : 'Year over year'} ·{' '}
-              {fmtMonth(variance!.walk!.prior.month)} → {fmtMonth(current.month)} ·{' '}
-              {CHANNEL_LABELS[channel]}
-            </p>
-            <WaterfallChart
-              data={variance!.walk!.steps}
-              yDomain={variance!.walk!.yDomain}
-            />
-            {drivers.length > 0 ? (
-              <ul className="mt-3 space-y-1 text-[11px]">
-                {drivers.map((d, i) => (
-                  <li key={d.name} className="flex items-start gap-2">
-                    <span
-                      className={
-                        'inline-block h-2 w-2 mt-1 rounded-full ' +
-                        (d.isNegativeImpact ? 'bg-[#ef4444]' : 'bg-[#22c55e]')
-                      }
-                    />
-                    <span className="text-foreground">
-                      {describeDriver(d, totalLabel, i === 0)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </>
-        ) : variance && 'error' in variance ? (
-          <div className="py-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              {period === 'yoy' ? 'YoY' : 'MoM'} unavailable — prior period{' '}
-              {variance.error === 'partial' ? 'is partial' : 'missing'}.
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Snapshot of {fmtMonth(current.month)} shown below.
-            </p>
-            <div className="mt-4">
-              <WaterfallChart data={snapshotSteps} />
-            </div>
-          </div>
         ) : (
           <>
-            <p className="text-[11px] text-muted-foreground mb-1 tabular-nums">
-              Snapshot · {fmtMonth(current.month)} · {CHANNEL_LABELS[channel]}
-            </p>
-            <WaterfallChart data={snapshotSteps} />
+            {headline ? (
+              <HeadlineBlock headline={headline} totalLabel={totalLabel} />
+            ) : null}
+
+            <div className="mt-5 pt-4 border-t border-border/60">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">
+                Supporting detail
+              </p>
+
+              {showingVariance ? (
+                <>
+                  <WaterfallChart
+                    data={variance!.walk!.steps}
+                    yDomain={variance!.walk!.yDomain}
+                  />
+                  {topDrivers.length > 0 ? (
+                    <ul className="mt-3 space-y-1 text-[11px]">
+                      {topDrivers.map((d, i) => (
+                        <li key={d.name} className="flex items-start gap-2">
+                          <span
+                            className={
+                              'inline-block h-2 w-2 mt-1 rounded-full ' +
+                              (d.isNegativeImpact ? 'bg-[#ef4444]' : 'bg-[#22c55e]')
+                            }
+                          />
+                          <span className="text-foreground">
+                            {describeDriver(d, totalLabel, i === 0)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : variance && 'error' in variance ? (
+                <div className="py-4 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {period === 'yoy' ? 'YoY' : 'MoM'} unavailable — prior period{' '}
+                    {variance.error === 'partial' ? 'is partial' : 'missing'}.
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Snapshot of {fmtMonth(current.month)} shown below.
+                  </p>
+                  <div className="mt-4">
+                    <WaterfallChart data={snapshotSteps} />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-[11px] text-muted-foreground mb-1 tabular-nums">
+                    Snapshot · {fmtMonth(current.month)} · {CHANNEL_LABELS[channel]}
+                  </p>
+                  <WaterfallChart data={snapshotSteps} />
+                </>
+              )}
+
+              {rateTrend.length >= 2 ? (
+                <BridgeTrendChart
+                  mode="rate-stacked"
+                  data={rateTrend}
+                  areas={bridge === 'net_sales' ? NET_SALES_AREAS : CONTRIBUTION_AREAS}
+                  lines={bridge === 'net_sales' ? NET_SALES_LINES : CONTRIBUTION_LINES}
+                  caption={`Rate trend (last 12mo, % of ${denominatorLabel}) — ${CHANNEL_LABELS[channel]}`}
+                />
+              ) : null}
+            </div>
           </>
         )}
-
-        {rateTrend.length >= 2 ? (
-          <BridgeTrendChart
-            mode="rate-stacked"
-            data={rateTrend}
-            areas={bridge === 'net_sales' ? NET_SALES_AREAS : CONTRIBUTION_AREAS}
-            lines={bridge === 'net_sales' ? NET_SALES_LINES : CONTRIBUTION_LINES}
-            caption={`Rate trend (last 12mo, % of ${denominatorLabel}) — ${CHANNEL_LABELS[channel]}`}
-          />
-        ) : null}
       </CardContent>
     </Card>
   )
