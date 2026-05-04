@@ -10,6 +10,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <head>
+        <meta
+          name="shopify-api-key"
+          content={process.env.SHOPIFY_CLIENT_ID || ''}
+        />
         <Script
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
           data-api-key={process.env.SHOPIFY_CLIENT_ID || ''}
