@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { format, differenceInSeconds } from 'date-fns'
 import { RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -696,8 +697,11 @@ function NotificationsForm({
         throw new Error(body?.error ?? `Save failed (${res.status})`)
       }
       setSaved(true)
+      toast.success('Notification settings saved')
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Save failed')
+      const msg = error instanceof Error ? error.message : 'Save failed'
+      setSaveError(msg)
+      toast.error('Failed to save notification settings', { description: msg })
     } finally {
       setSaving(false)
     }
@@ -791,8 +795,11 @@ function ChannelConfigForm({ settings }: { settings: SettingsValues }) {
         throw new Error(body?.error ?? `Save failed (${res.status})`)
       }
       setSaved(true)
+      toast.success('Channel configuration saved')
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Save failed')
+      const msg = error instanceof Error ? error.message : 'Save failed'
+      setSaveError(msg)
+      toast.error('Failed to save channel configuration', { description: msg })
     } finally {
       setSaving(false)
     }
@@ -1041,23 +1048,44 @@ function SyncAllControl() {
     setMessage(null)
     setMessageStatus(null)
 
+    const toastId = toast.loading('Starting sync…')
+
     try {
-      const result = await runSyncAll(syncSource)
+      const result = await runSyncAll(async (source) => {
+        toast.loading(`Syncing ${SOURCE_LABELS[source] ?? source}…`, { id: toastId })
+        return syncSource(source)
+      })
       const totalRows = result.results.reduce((sum, step) => sum + step.rows, 0)
       const hasPartial = result.results.some((step) => step.status === 'partial')
 
       if (!result.ok) {
         const failed = result.results[result.results.length - 1]
-        setMessage(`Sync all stopped at ${SOURCE_LABELS[result.failedSource ?? ''] ?? result.failedSource}: ${failed?.message ?? 'Sync failed'}`)
+        const failedLabel = SOURCE_LABELS[result.failedSource ?? ''] ?? result.failedSource
+        const detail = failed?.message ?? 'Sync failed'
+        setMessage(`Sync all stopped at ${failedLabel}: ${detail}`)
         setMessageStatus('error')
+        toast.error(`Sync stopped at ${failedLabel}`, {
+          id: toastId,
+          description: detail,
+        })
         return
       }
 
-      setMessage(`Sync all completed — ${totalRows} rows across ${result.results.length} sources`)
+      const description = `${totalRows.toLocaleString()} rows across ${result.results.length} sources`
+      setMessage(`Sync all completed — ${description}`)
       setMessageStatus(hasPartial ? 'partial' : 'success')
+      if (hasPartial) {
+        toast.warning('Sync completed with warnings', {
+          id: toastId,
+          description,
+        })
+      } else {
+        toast.success('Sync complete', { id: toastId, description })
+      }
     } catch {
       setMessage('Sync all request failed')
       setMessageStatus('error')
+      toast.error('Sync request failed', { id: toastId })
     } finally {
       setCurrentSource(null)
       setSyncingAll(false)
@@ -1136,8 +1164,10 @@ function PinManagement({
       const res = await postSettings({ pin_protected_pages: selectedPages })
       if (!res.ok) throw new Error()
       setPagesMessage('Saved')
+      toast.success('PIN-protected pages saved')
     } catch {
       setPagesMessage('Failed to save')
+      toast.error('Failed to save PIN-protected pages')
     } finally {
       setSavingPages(false)
     }
@@ -1169,11 +1199,14 @@ function PinManagement({
         setNewPin('')
         setConfirmPin('')
         setPinHint('')
+        toast.success('PIN updated')
       } else {
         setError('Failed to update PIN')
+        toast.error('Failed to update PIN')
       }
     } catch {
       setError('Failed to update PIN')
+      toast.error('Failed to update PIN')
     } finally {
       setSaving(false)
     }
@@ -1337,10 +1370,14 @@ function SyncSourceCard({
   async function handleSync() {
     setSyncing(true)
     setResultMessage(null)
+    const sourceLabel = SOURCE_LABELS[source] ?? source
+    const toastId = toast.loading(`Syncing ${sourceLabel}…`)
     try {
       const token = await getShopifySessionToken()
       if (!token) {
-        setResultMessage('Open this app inside Shopify admin to run sync.')
+        const msg = 'Open this app inside Shopify admin to run sync.'
+        setResultMessage(msg)
+        toast.error(msg, { id: toastId })
         return
       }
       const res = await fetch(`/api/sync/${source}`, {
@@ -1374,6 +1411,17 @@ function SyncSourceCard({
             ? `Sync partial — ${rows} rows${summary}`
             : `Sync completed — ${rows} rows`,
         )
+        if (status === 'partial') {
+          toast.warning(`${sourceLabel} synced with warnings`, {
+            id: toastId,
+            description: `${rows.toLocaleString()} rows${summary}`,
+          })
+        } else {
+          toast.success(`${sourceLabel} synced`, {
+            id: toastId,
+            description: `${rows.toLocaleString()} rows`,
+          })
+        }
         setLog({
           id: '',
           source: logSource,
@@ -1395,6 +1443,10 @@ function SyncSourceCard({
       } else {
         const errMsg = body?.error ?? `Failed (${res.status})`
         setResultMessage(errMsg)
+        toast.error(`${sourceLabel} sync failed`, {
+          id: toastId,
+          description: errMsg,
+        })
         setLog({
           id: '',
           source: logSource,
@@ -1407,6 +1459,10 @@ function SyncSourceCard({
       }
     } catch {
       setResultMessage('Sync request failed')
+      toast.error(`${sourceLabel} sync failed`, {
+        id: toastId,
+        description: 'Sync request failed',
+      })
     } finally {
       setSyncing(false)
     }

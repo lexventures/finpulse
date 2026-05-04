@@ -6,6 +6,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { ForecastComboChart } from '@/components/charts/forecast-combo-chart'
 import { BridgeCard, type BridgeCardData } from '@/components/dashboard/bridge-card'
+import { HeroRunwayCard } from '@/components/dashboard/hero-runway-card'
+import { FreshnessChip } from '@/components/dashboard/freshness-chip'
 import { GroupedBarChart } from '@/components/charts/grouped-bar-chart'
 import { DualAxisLineChart } from '@/components/charts/dual-axis-line-chart'
 import { MonthlyCacChart } from '@/components/charts/monthly-cac-chart'
@@ -18,6 +20,10 @@ import {
 import { formatAsOfYear } from '@/lib/date-labels'
 import { PinUnlockGate } from '@/components/pin-unlock-gate'
 import { getPinGateForPath } from '@/lib/pin-access-server'
+import {
+  computeFreshness,
+  type FreshnessSyncLog,
+} from '@/lib/freshness'
 
 const WEEKS_PER_MONTH = 4.33
 
@@ -142,7 +148,7 @@ export default async function DashboardPage() {
 
   const supabase = createServiceClient()
 
-  const [pnlRes, bsRes, cfRes, fcAllRes, kpiCacRes] = await Promise.all([
+  const [pnlRes, bsRes, cfRes, fcAllRes, kpiCacRes, syncLogRes] = await Promise.all([
     supabase
       .from('fin_pnl_monthly')
       .select(
@@ -174,6 +180,11 @@ export default async function DashboardPage() {
       .eq('channel', 'dtc')
       .order('month', { ascending: false })
       .limit(24),
+    supabase
+      .from('fin_sync_log')
+      .select('source, started_at, completed_at, status')
+      .order('started_at', { ascending: false })
+      .limit(60),
   ])
 
   const pnl = (pnlRes.data ?? []) as PnlRow[]
@@ -181,6 +192,9 @@ export default async function DashboardPage() {
   const cf = (cfRes.data ?? []) as CfRow[]
   const fcAll = (fcAllRes.data ?? []) as ForecastDbRow[]
   const kpiCacRows = (kpiCacRes.data ?? []) as MonthlyLtvCacInput[]
+  const syncLogs = (syncLogRes.data ?? []) as FreshnessSyncLog[]
+  const nowIso = new Date().toISOString()
+  const freshness = computeFreshness(syncLogs, new Date(nowIso))
 
   const latestFcDate = fcAll[0]?.forecast_run_date
   const fcWeeks = latestFcDate
@@ -370,65 +384,71 @@ export default async function DashboardPage() {
   const summaryHealthy = lowestForecast > 0 && runwayWeeks > 8
   const summaryColor = summaryHealthy ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
 
+  const heroAsOfLabel = `P&L ${formatAsOfYear(latestCompanyPnl?.month)} · BS ${formatAsOfYear(latestBs?.month)}`
+  const forecastNote = forecastFromPipeline
+    ? `Forecast through ${formatAsOfYear(latestFcDate)}`
+    : 'Forecast estimated from trailing P&L'
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="border-b border-gray-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-800">Financial Health Dashboard</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
+    <div className="min-h-screen bg-muted/30">
+      <div className="border-b border-border bg-card">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Financial Health Dashboard</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
               13-Week Cash Flow &middot; Net sales &amp; contribution bridges &middot; AP/AR &middot; Burn &amp; runway
             </p>
-            <p className="text-[10px] text-gray-400 mt-1 tabular-nums">
-              As of: P&amp;L {formatAsOfYear(latestCompanyPnl?.month)} · Balance sheet{' '}
-              {formatAsOfYear(latestBs?.month)} · Cash flow {formatAsOfYear(cf[0]?.month)}
-            </p>
           </div>
-          <Link
-            href="/settings"
-            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
-            title="Settings"
-          >
-            <Settings className="size-5" />
-          </Link>
+          <div className="flex items-center gap-2 shrink-0">
+            <FreshnessChip freshness={freshness} now={nowIso} />
+            <Link
+              href="/settings"
+              className="p-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title="Settings"
+            >
+              <Settings className="size-5" />
+            </Link>
+          </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <HeroRunwayCard
+          runwayWeeks={runwayWeeks}
+          startingCash={startingCashForForecast}
+          weeklyBurnRate={weeklyBurnRate}
+          asOfLabel={heroAsOfLabel}
+          forecastNote={forecastNote}
+        />
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
             label="CASH POSITION"
             value={fmtFull(cashPosition)}
             sub={
               cashPosition === 0 && startingCashForForecast > 0
-                ? `BS $0 (${formatAsOfYear(latestBs?.month)}); runway/forecast use CF ending ${formatAsOfYear(cf[0]?.month)}`
+                ? `BS $0 (${formatAsOfYear(latestBs?.month)}); using CF ending ${formatAsOfYear(cf[0]?.month)}`
                 : `Balance sheet cash & equivalents (${formatAsOfYear(latestBs?.month)})`
             }
-            color="blue"
+            tone="primary"
           />
           <KpiCard
             label="WEEKLY BURN RATE"
             value={`${fmtFull(weeklyBurnRate)}/wk`}
-            sub={`COGS + opex + other + interest · last 3 completed mo through ${formatAsOfYear(companyPnl[0]?.month)}`}
-            color="red"
-          />
-          <KpiCard
-            label="RUNWAY"
-            value={`${runwayWeeks} weeks`}
-            sub={`${fmtFull(startingCashForForecast)} starting cash (same rule as cash forecast) · burn through ${formatAsOfYear(companyPnl[0]?.month)}`}
-            color={runwayWeeks > 12 ? 'green' : runwayWeeks > 8 ? 'yellow' : 'red'}
+            sub={`COGS + opex + other + interest · last 3 mo through ${formatAsOfYear(companyPnl[0]?.month)}`}
+            tone="danger"
           />
           <KpiCard
             label="TOTAL AP OUTSTANDING"
             value={fmtFull(totalApOutstanding)}
             sub={`Finaloop balance sheet AP (${formatAsOfYear(latestBs?.month)})`}
-            color="orange"
+            tone="warning"
           />
           <KpiCard
             label="NET SALES % OF GROSS"
             value={fmtPct(netSalesOfGrossPct)}
             sub={`net revenue ÷ gross · company P&amp;L ${formatAsOfYear(latestCompanyPnl?.month)}`}
-            color="blue"
+            tone="primary"
           />
         </div>
 
@@ -565,26 +585,39 @@ export default async function DashboardPage() {
   )
 }
 
-function KpiCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
-  const colorMap: Record<string, string> = {
-    blue: 'bg-blue-50 border-blue-200',
-    red: 'bg-red-50 border-red-200',
-    green: 'bg-emerald-50 border-emerald-200',
-    yellow: 'bg-amber-50 border-amber-200',
-    orange: 'bg-orange-50 border-orange-200',
+type KpiTone = 'neutral' | 'primary' | 'danger' | 'warning'
+
+function KpiCard({
+  label,
+  value,
+  sub,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  sub: string
+  tone?: KpiTone
+}) {
+  const valueTone: Record<KpiTone, string> = {
+    neutral: 'text-foreground',
+    primary: 'text-foreground',
+    danger: 'text-red-700 dark:text-red-400',
+    warning: 'text-amber-700 dark:text-amber-400',
   }
-  const textMap: Record<string, string> = {
-    blue: 'text-blue-700',
-    red: 'text-red-700',
-    green: 'text-emerald-700',
-    yellow: 'text-amber-700',
-    orange: 'text-orange-700',
+  const accent: Record<KpiTone, string> = {
+    neutral: 'before:bg-border',
+    primary: 'before:bg-primary/40',
+    danger: 'before:bg-red-500/60',
+    warning: 'before:bg-amber-500/60',
   }
   return (
-    <div className={`rounded-xl border p-4 ${colorMap[color] ?? 'bg-white border-gray-200'}`}>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={`text-xl font-bold mt-1 ${textMap[color] ?? 'text-foreground'}`}>{value}</p>
-      <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>
+    <div
+      className={`relative overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 px-4 py-3.5
+        before:absolute before:inset-y-0 before:left-0 before:w-1 ${accent[tone]}`}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={`text-xl font-bold mt-1 tabular-nums ${valueTone[tone]}`}>{value}</p>
+      <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{sub}</p>
     </div>
   )
 }
